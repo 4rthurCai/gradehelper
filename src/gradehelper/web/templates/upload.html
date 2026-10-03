@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{{ g.hw.name }} upload · Grade Helper{% endblock %}
+{% block content %}
+<p><a href="/hw/{{ g.hw.number }}?stage=group">← {{ g.hw.name }}</a></p>
+<h1>Canvas upload</h1>
+{% if error %}
+  <div class="notice bad">{{ error }}</div>
+{% else %}
+<p class="muted">Assignment <strong>{{ assignment.name }}</strong> (id {{ assignment.id }}). Source: hws/{{ g.hw.name }}.csv, including any hand edits.
+  Grades already uploaded with the same score and comment are skipped{% if not force %} (<a href="?force=1">include them</a>){% endif %}.</p>
+{% if result %}
+  <div class="notice {{ 'bad' if result[1] else 'ok' }}">Uploaded {{ result[0] }} grade(s).{% if result[1] %} {{ result[1] | length }} failed.{% endif %}</div>
+  {% for f in result[1] %}<div class="notice bad">{{ f }}</div>{% endfor %}
+{% elif plan.to_send %}
+  <form method="post" action="/hw/{{ g.hw.number }}/upload" class="panel row" hx-confirm="Post {{ plan.to_send | length }} grades and comments to Canvas?">
+    <input type="hidden" name="digest" value="{{ digest }}">
+    {% if force %}<input type="hidden" name="force" value="true">{% endif %}
+    <strong>{{ plan.to_send | length }} to post</strong>
+    <span class="muted">{{ plan.grades | length - plan.to_send | length }} unchanged</span>
+    <button class="danger">Upload to Canvas</button>
+  </form>
+{% else %}
+  <div class="notice ok">Nothing to upload: every grade matches the last upload.</div>
+{% endif %}
+{% for r in plan.unmatched_rows %}<div class="notice warn">CSV row without a Canvas submission: {{ r.id }} {{ r.name }}</div>{% endfor %}
+{% if plan.unmatched_users %}<details><summary>{{ plan.unmatched_users | length }} Canvas student(s) not in the CSV</summary><ul class="detail-list">{% for u in plan.unmatched_users %}<li>{{ u }}</li>{% endfor %}</ul></details>{% endif %}
+{% if plan.to_send %}
+<div class="table-wrap" style="margin-top: 14px">
+<table>
+  <thead><tr><th>ID</th><th>Name</th><th>Canvas now</th><th>New</th><th>Comment</th></tr></thead>
+  <tbody>
+  {% for p in plan.to_send %}
+    <tr><td class="muted">{{ p.row.id }}</td><td>{{ p.row.name }}</td>
+      <td>{{ p.current_score | pts if p.current_score is not none else "–" }}</td>
+      <td class="score">{{ p.row.score | pts }}</td><td style="max-width: 520px">{{ p.row.comment }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

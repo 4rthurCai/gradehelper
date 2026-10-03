@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ g.hw.name }} warnings · Grade Helper{% endblock %}
+{% block content %}
+<p><a href="/hw/{{ g.hw.number }}?stage={{ stage }}">← {{ g.hw.name }}</a></p>
+<h1>Mattermost warnings · {{ stage }} stage</h1>
+<p class="muted">One message per student, posted to their personal channel. Only {{ stage }}-stage deductions are mentioned.</p>
+{% if sent %}
+  <div class="notice {{ 'bad' if sent[1] else 'ok' }}">Sent {{ sent[0] }} message(s).{% if sent[1] %} {{ sent[1] | length }} failed:{% endif %}</div>
+  {% for f in sent[1] %}<div class="notice bad">{{ f }}</div>{% endfor %}
+{% elif warnings %}
+  <form method="post" action="/hw/{{ g.hw.number }}/warnings" class="panel row" hx-confirm="Send {{ warnings | length }} Mattermost messages now?">
+    <input type="hidden" name="stage" value="{{ stage }}">
+    <input type="hidden" name="count" value="{{ warnings | length }}">
+    <strong>{{ warnings | length }} messages ready</strong>
+    <button class="danger">Send all</button>
+  </form>
+{% else %}
+  <div class="notice ok">Nobody needs a warning.</div>
+{% endif %}
+{% for w in warnings %}
+  <h2>{{ w.name }} <span class="muted">{{ w.student_id }}</span></h2>
+  <div class="message">{{ w.text }}</div>
+{% endfor %}
+{% endblock %}

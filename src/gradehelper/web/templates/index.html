@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Homeworks</h1>
+<p class="muted">Run a stage, review the table, adjust, then warn students or upload to Canvas. Nothing leaves this machine until you confirm.</p>
+{% include "_job.html" %}
+<div class="grid">
+{% for item in homeworks %}
+  {% set hw = item.hw %}
+  <section class="panel">
+    <div class="row" style="justify-content: space-between">
+      <h2 style="margin: 0"><a href="/hw/{{ hw.number }}">{{ hw.name }}</a></h2>
+      <span class="chip">{{ hw.language }}</span>
+    </div>
+    <p class="muted" style="margin: 6px 0">
+      Individual deadline: {{ hw.deadlines.individual or "not set" }}<br>
+      Group deadline: {{ hw.deadlines.group or "not set" }}
+    </p>
+    <div class="row">
+      {% for stage in ["individual", "group"] %}
+        {% if stage in item.results %}
+          <span class="chip ok">{{ stage }} · {{ item.results[stage].generated_at[:16].replace("T", " ") }} UTC</span>
+        {% else %}
+          <span class="chip">{{ stage }} · not run</span>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <p style="margin: 10px 0 6px">Suggested: <strong>{{ item.suggested }}</strong> <span class="muted">({{ item.reason }})</span></p>
+    <form method="post" action="/hw/{{ hw.number }}/run/{{ item.suggested }}" class="row">
+      <input type="text" name="teams" placeholder="teams, e.g. 1,5 (blank = all)" size="22">
+      <button class="primary" {% if jobs.busy %}disabled{% endif %}>Run {{ item.suggested }}</button>
+    </form>
+  </section>
+{% endfor %}
+</div>
+{% endblock %}

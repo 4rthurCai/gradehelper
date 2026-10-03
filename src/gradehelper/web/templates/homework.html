@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}{{ g.hw.name }} · Grade Helper{% endblock %}
+{% block content %}
+{% set result = results.get(stage) %}
+<div class="row" style="justify-content: space-between">
+  <div>
+    <h1>{{ g.hw.name }} <span class="muted" style="font-weight: 400">· {{ g.hw.language }}</span></h1>
+    <p class="muted" style="margin: 0">
+      {% if result %}{{ stage }} result from {{ result.generated_at.replace("T", " ") }}{% if result.params.get("joj_deadline") %} · JOJ at {{ result.params.joj_deadline }}{% endif %}{% if result.params.get("cutoff") %} · cutoff {{ result.params.cutoff }}{% endif %}{% if result.params.get("late_after") %} · late after {{ result.params.late_after }}{% endif %}
+      {% else %}no {{ stage }} result yet{% endif %}
+    </p>
+  </div>
+  <div class="tabs row">
+    {% for s, label in [("individual", "1 · Individual"), ("group", "2 · Group"), ("final", "3 · Group +1 day")] %}
+    <a href="/hw/{{ g.hw.number }}?stage={{ s }}" class="{{ 'active' if stage == s }}">{{ label }}{% if s not in results %} <span class="muted">(not run)</span>{% endif %}</a>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="panel" style="margin-top: 14px">
+  <form method="post" action="/hw/{{ g.hw.number }}/run/{{ stage }}" class="row">
+    <strong>Run {{ stage }} stage</strong>
+    <input type="text" name="teams" placeholder="teams (blank = all)" size="16">
+    <input type="text" name="deadline" placeholder="deadline override, RFC 3339" size="28">
+    <button class="primary" {% if jobs.busy %}disabled{% endif %}>Run</button>
+    <span class="muted">reads Canvas/Gitea/git only</span>
+  </form>
+  <div class="row" style="margin-top: 10px">
+    <a class="button" href="/hw/{{ g.hw.number }}/warnings?stage={{ stage }}">Preview Mattermost warnings…</a>
+    {% if stage != "individual" %}<a class="button" href="/hw/{{ g.hw.number }}/upload">Preview Canvas upload…</a>
+    <a class="button" href="/hw/{{ g.hw.number }}/late-issues">Late-team issues…</a>{% endif %}
+    <span class="muted">CSV: hws/{{ g.hw.name }}{{ "indv" if stage == "individual" }}.csv · overrides: hws/{{ g.hw.name }}.overrides.toml</span>
+  </div>
+  <p class="muted" style="margin: 8px 0 0">
+    {% if stage == "individual" %}At the individual deadline: grade, then warn on Mattermost.
+    {% elif stage == "group" %}At the group deadline: pre-grading, upload to Canvas; records teams without an on-time release.
+    {% else %}Group deadline + 1 day: full grading, <strong>do not upload yet</strong>. Push hws/{{ g.hw.name }}.csv to hw-scoreboard, open late-team issues, let TAs adjust the sheet, pull, then upload.{% endif %}
+  </p>
+  <div>
+  </div>
+</div>
+{% include "_job.html" %}
+{% for p in problems %}<div class="notice warn">{{ p }}</div>{% endfor %}
+
+{% if rows or issues %}
+{% set counts = {} %}
+{% for r in rows %}{% for d in r.grade.deductions %}{% set _ = counts.update({d.key: counts.get(d.key, 0) + 1}) %}{% endfor %}{% endfor %}
+<div class="stats">
+  <span class="chip">{{ rows | length }} students{% if issues %} with issues{% endif %}</span>
+  {% for key, n in counts.items() %}<span class="chip warn">{{ key }} · {{ n }}</span>{% endfor %}
+  <a href="?stage={{ stage }}{{ '' if issues else '&issues=1' }}">{{ "show everyone" if issues else "only students with deductions" }}</a>
+</div>
+{% if team_overrides %}<div class="notice warn">{{ team_overrides | length }} team-wide override(s) in the TOML file also apply.</div>{% endif %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Team</th><th>Name</th><th>ID</th><th>Score</th><th>Deductions</th>{% if stage != "individual" %}<th>Late</th>{% endif %}<th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    {% set o = overrides.get(r.student.id) %}
+    <tr id="s{{ r.student.id }}">
+      <td>{{ r.student.team }}</td>
+      <td>{{ r.student.display_name }}</td>
+      <td class="muted">{{ r.student.id }}</td>
+      <td class="score {{ 'floor' if r.grade.score <= -2.5 else ('neg' if r.grade.score < 0) }}">{{ r.grade.score | pts }}</td>
+      <td>
+        {% for d in r.grade.deductions %}<span class="chip bad" title="{{ d.description }}">{{ d.key }}{% if d.count > 1 %} ×{{ d.count }}{% endif %} {{ d.points | pts }}</span>{% endfor %}
+        {% if o %}<span class="chip ok">adjusted</span>{% endif %}
+        {% if r.grade.details or r.grade.notes %}
+        <details><summary>details</summary>
+          <ul class="detail-list">{% for x in r.grade.details %}<li>{{ x }}</li>{% endfor %}{% for x in r.grade.notes %}<li><em>note: {{ x }}</em></li>{% endfor %}</ul>
+        </details>
+        {% endif %}
+      </td>
+      {% if stage != "individual" %}<td>{% if r.meta.late %}<span class="chip warn">late</span>{% endif %}<div class="muted" style="font-size: 12px">{{ r.meta.release_time[:16].replace("T", " ") }}</div>{% for n in r.meta.notes %}<div class="chip warn" title="TA note">{{ n }}</div>{% endfor %}</td>{% endif %}
+      <td>
+        <details><summary>adjust</summary>
+          <form method="post" action="/hw/{{ g.hw.number }}/override" style="margin-top: 6px; min-width: 240px">
+            <input type="hidden" name="student" value="{{ r.student.id }}">
+            <input type="hidden" name="stage" value="{{ stage }}">
+            {% set removable = (r.grade.deductions | map(attribute="key") | list) + ((o.remove | list) if o else []) %}
+            {% for key in removable | unique %}
+              <label style="display: block"><input type="checkbox" name="remove" value="{{ key }}" {% if o and key in o.remove %}checked{% endif %}> drop {{ key }}</label>
+            {% endfor %}
+            <label style="display: block; margin-top: 4px">fixed score <input type="number" step="0.25" name="score" value="{{ o.score if o and o.score is not none else '' }}" style="width: 80px"></label>
+            <label style="display: block; margin-top: 4px">note (shown to student)<br><input type="text" name="note" value="{{ o.note if o else '' }}" style="width: 100%"></label>
+            <div class="row" style="margin-top: 6px"><button class="primary">Save</button>{% if o %}<span class="muted">clear all fields to remove</span>{% endif %}</div>
+          </form>
+        </details>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="muted">No results for this stage yet. Run it above.</p>
+{% endif %}
+{% endblock %}

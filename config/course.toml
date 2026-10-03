@@ -1,0 +1,127 @@
+# Course-wide grading rules. Per-homework settings live in config/homeworks/hN.toml.
+# Credentials are NOT here: they come from .env (same variable names as Joint-Teapot).
+
+score_floor = -2.5          # lowest score a student can get per homework
+default_language = "matlab"
+default_pass_threshold = 50
+workers = 8                 # teams checked in parallel
+roster_file = "hteams.csv"  # Name,ID,Email,Team  (refresh: gradehelper roster sync)
+output_dir = "hws"
+final_grace_hours = 24      # the "group deadline + 1 day" run; per homework: [deadlines] final = ...
+
+# Rubric. Order here = order in student comments. stage decides which run produces it.
+[rubric.indvFailSubmit]
+points = -1
+description = "individual submission missing"
+stage = "individual"
+
+[rubric.indvUntidy]
+points = -0.25
+description = "individual branch untidy"
+stage = "individual"
+
+[rubric.noIndividualPR]
+points = -0.5
+description = "no individual PR found"
+stage = "individual"
+
+[rubric.notWritingPR]
+points = -0.25
+description = "not writing PR as required"
+stage = "individual"
+
+[rubric.jojFailHomework]
+points = -0.5
+description = "JOJ homework not passed"
+stage = "individual"
+
+[rubric.jojFailExercise]
+points = -0.25
+description = "JOJ exercise not passed"
+stage = "individual"
+
+[rubric.groupFailSubmit]
+points = -2.5
+description = "group submission missing"
+stage = "group"
+
+[rubric.groupUntidy]
+points = -0.25
+description = "group submission untidy"
+stage = "group"
+
+[rubric.groupLowCodeQuality]
+points = -0.5               # per distinct issue type
+description = "group code quality issue"
+stage = "group"
+
+[rubric.noReview]
+points = -1
+description = "missing others' code review"
+stage = "group"
+
+[rubric.jojFailCompile]
+points = -2.5
+description = "JOJ failed to compile"
+stage = "group"
+
+[rubric.jojGroupFailHomework]
+points = -0.5
+description = "JOJ group homework not passed"
+stage = "group"
+
+[rubric.jojGroupFailExercise]
+points = -0.25
+description = "JOJ group exercise not passed"
+stage = "group"
+
+[joj]
+repo = "engr151-joj"
+branch = "grading"
+scoreboard_path = "homework/h{hw}.csv"
+release_status_context = "Run JOJ3 on Release"  # red cross on this workflow = jojFailCompile
+
+# Individual submission, JOJ scoreboard at the individual deadline (course rules).
+[joj.individual]
+exercise_fail_percent = 10   # each graded exercise below this -> jojFailExercise (-0.25, max 2)
+homework_fail_percent = 25   # average of graded exercises below this -> jojFailHomework
+max_exercise_failures = 2
+
+# Group submission, the JOJ3 run of the hN release (issue in the team repo).
+[joj.group]
+exercise_fail_percent = 25   # -> jojGroupFailExercise (-0.25, max 2)
+homework_fail_percent = 50   # -> jojGroupFailHomework
+max_exercise_failures = 2
+
+[layout]
+# Allowed at the repository root besides hN/ directories and README files.
+root_allowlist = [".gitignore", ".gitea", ".gitattributes", "issue_template", "workflows", "PULL_REQUEST_TEMPLATE.md"]
+# Additionally allowed inside .gitea/ (group check only).
+gitea_dir_allowlist = ["pull_request_template.md"]
+max_homework_dirs = 20
+
+[review]
+min_length = 15
+min_substantive_ratio = 0.5  # below this share of non-boilerplate text the review does not count
+perfunctory_phrases = [
+    "lgtm", "looks good to me", "looks good", "ok", "okay", "good", "fine", "approved", "approve",
+    "agree", "nice job", "well done", "great work", "no comments", "good job", "all good",
+    "nothing to add", "no issues", "no problem", "seems fine", "seems good", "i agree", "i approve",
+    "i like it", "thank you", "thanks", "good code", "great code", "excellent", "perfect",
+    "good work", "nice", "excellent work", "looks great", "no suggestions", "all set",
+    "sounds good", "works for me", "i like this", "well implemented", "good implementation",
+    "solid work", "clean code", "great job", "very good", "fantastic", "superb", "brilliant",
+    "outstanding", "impressive", "keep it up", "good effort", "nice effort", "good to go",
+    "ready to merge", "looks perfect", "nothing else to add", "no further comments",
+    "all looks good", "everything looks good", "everything looks fine", "everything looks great",
+    "great effort",
+]
+
+[pr_description]
+templates = ["individual_submission.md", "whole_submission.md"]  # under templates/
+unfilled_threshold = 0.6
+
+[late_issue]
+# Opened by `gradehelper late-issues hN` in repos of teams without an on-time release.
+title = "{hw} feedback"
+body = "Late submission, no feedback provided."

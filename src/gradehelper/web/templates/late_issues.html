@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ g.hw.name }} late issues · Grade Helper{% endblock %}
+{% block content %}
+<p><a href="/hw/{{ g.hw.number }}">← {{ g.hw.name }}</a></p>
+<h1>Late-team issues</h1>
+<p class="muted">Teams without a release by the group deadline get no feedback. Issues are assigned to all collaborators; teams that already have an issue with this title are skipped.</p>
+{% set todo = plan | rejectattr("exists") | list %}
+{% if result %}
+  <div class="notice {{ 'bad' if result[1] else 'ok' }}">Opened: {{ result[0] | join(", ") or "none" }}.</div>
+  {% for f in result[1] %}<div class="notice bad">{{ f }}</div>{% endfor %}
+{% elif todo %}
+  <form method="post" action="/hw/{{ g.hw.number }}/late-issues" class="panel row" hx-confirm="Open {{ todo | length }} issue(s) on Gitea?">
+    <input type="hidden" name="count" value="{{ todo | length }}">
+    <strong>{{ todo | length }} issue(s) to open</strong>
+    <button class="danger">Open issues</button>
+  </form>
+{% elif not plan %}
+  <div class="notice ok">No late teams.</div>
+{% else %}
+  <div class="notice ok">Every late team already has the issue.</div>
+{% endif %}
+{% if plan %}
+<div class="table-wrap" style="margin-top: 14px">
+<table>
+  <thead><tr><th>Team</th><th>Members</th><th>Title</th><th>Body</th><th></th></tr></thead>
+  <tbody>
+  {% for p in plan %}
+    <tr><td>{{ p.team.repo }}</td><td>{{ p.team.members | map(attribute="display_name") | join(", ") }}</td>
+      <td>{{ p.title }}</td><td>{{ p.body }}</td>
+      <td>{% if p.exists %}<span class="chip">exists</span>{% else %}<span class="chip warn">to open</span>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,15 @@
+{% set job = jobs.current %}
+<div id="job" {% if job and not job.done %}hx-get="/job" hx-trigger="every 1s" hx-swap="outerHTML" hx-boost="false"{% endif %}>
+{% if job %}
+  <div class="panel" style="margin: 12px 0">
+    <div class="row">
+      <strong>{{ job.title }}</strong>
+      {% if not job.done %}<span class="chip warn">running…</span>
+      {% elif job.error %}<span class="chip bad">failed</span>
+      {% else %}<span class="chip ok">done</span> <a href="">reload results</a>{% endif %}
+    </div>
+    {% if job.error %}<div class="notice bad">{{ job.error }}</div>{% endif %}
+    <pre class="log">{{ job.lines[-40:] | join("\n") }}</pre>
+  </div>
+{% endif %}
+</div>

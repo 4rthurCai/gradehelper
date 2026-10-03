@@ -1,0 +1,19 @@
+# h8. Fill in deadlines so `gradehelper run h8` can pick the stage by itself.
+language = "cc"
+pass_threshold = 150  # JOJ h8 total at/above this passes all JOJ checks
+mandatory = ["CMakeLists.txt", "Makefile", "homework.h", "main.cpp", "ex1.cpp", "ex2.cpp"]
+optional = ["ex3.cpp", "ex1.h", "ex2.h", "ex3.h", "ex2-shapes.cpp", "ex2-shapes.h"]
+# canvas_assignment_id = 0  # only needed if several assignments start with this hN
+
+[deadlines]
+# individual = "2026-10-01T23:59:59+08:00"
+# group = "2026-10-03T23:59:59+08:00"
+# final = ...   # the "+1 day" run; defaults to group + final_grace_hours
+
+# JOJ exercise maxima are read from the JOJ3 configs in engr151-joj (master branch):
+# hN/exK/conf.json (individual) and hN/conf-release.json (release, graded exercises).
+# Override only if needed:
+# [joj.exercises]  # individual max per exercise number; 0 = not graded
+# 2 = 10
+# [joj.release]    # release max per exercise
+# ex2 = 45

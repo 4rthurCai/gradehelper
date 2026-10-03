@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Grade Helper{% endblock %}</title>
+<script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e2dc;
+  --accent: #2f5fd0; --accent-text: #ffffff; --bad: #b42318; --bad-bg: #fdecea;
+  --warn: #9a5b00; --warn-bg: #fff4dd; --ok: #1e7b46; --ok-bg: #e6f4ec; --chip: #eeede8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161615; --panel: #1f1f1d; --text: #ecebe6; --muted: #9b9a93; --line: #34332f;
+    --accent: #7ea2ff; --accent-text: #10131a; --bad: #ff8a80; --bad-bg: #3a1d1b;
+    --warn: #f2b65a; --warn-bg: #36290f; --ok: #6fd39b; --ok-bg: #13301f; --chip: #2b2a27;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161615; --panel: #1f1f1d; --text: #ecebe6; --muted: #9b9a93; --line: #34332f;
+  --accent: #7ea2ff; --accent-text: #10131a; --bad: #ff8a80; --bad-bg: #3a1d1b;
+  --warn: #f2b65a; --warn-bg: #36290f; --ok: #6fd39b; --ok-bg: #13301f; --chip: #2b2a27;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; }
+header.top { display: flex; align-items: baseline; gap: 16px; padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header.top a.brand { font-weight: 650; color: var(--text); text-decoration: none; }
+main { max-width: 1180px; margin: 0 auto; padding: 20px 24px 60px; }
+a { color: var(--accent); }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 16px; margin: 24px 0 8px; }
+.muted { color: var(--muted); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+button, .button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  padding: 6px 12px; border-radius: 7px; cursor: pointer; text-decoration: none; display: inline-block; }
+button.primary, .button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+button.danger { background: var(--bad); color: var(--panel); border-color: var(--bad); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+input[type=text], input[type=number] { font: inherit; padding: 5px 8px; border: 1px solid var(--line);
+  border-radius: 6px; background: var(--bg); color: var(--text); }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--chip); font-size: 12px; margin: 1px 2px; white-space: nowrap; }
+.chip.bad { background: var(--bad-bg); color: var(--bad); }
+.chip.warn { background: var(--warn-bg); color: var(--warn); }
+.chip.ok { background: var(--ok-bg); color: var(--ok); }
+.tabs a { padding: 6px 12px; border-radius: 7px; text-decoration: none; color: var(--muted); }
+.tabs a.active { background: var(--chip); color: var(--text); font-weight: 600; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--bg); position: sticky; top: 0; }
+td.score { font-variant-numeric: tabular-nums; font-weight: 650; white-space: nowrap; }
+td.score.neg { color: var(--warn); } td.score.floor { color: var(--bad); }
+details summary { cursor: pointer; color: var(--accent); }
+.detail-list { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+pre.log { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; max-height: 260px; overflow: auto; font-size: 12px; margin: 8px 0 0; }
+.message { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 6px 0 14px; }
+.notice { padding: 10px 14px; border-radius: 8px; margin: 12px 0; }
+.notice.bad { background: var(--bad-bg); color: var(--bad); }
+.notice.ok { background: var(--ok-bg); color: var(--ok); }
+.notice.warn { background: var(--warn-bg); color: var(--warn); }
+.stats { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 14px; }
+@media (max-width: 640px) {
+  header.top, main { padding-left: 16px; padding-right: 16px; }
+  th:nth-child(3), td:nth-child(3) { display: none; }
+}
+</style>
+</head>
+<body hx-boost="true" hx-headers='{"X-Token": "{{ token }}"}'>
+<header class="top">
+  <a class="brand" href="/">Grade Helper</a>
+  <span class="muted">ENGR1510J · local only</span>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+<script>
+document.body.addEventListener("htmx:responseError", function (e) {
+  alert("Request failed (" + e.detail.xhr.status + "): " + e.detail.xhr.responseText);
+});
+</script>
+</body>
+</html>
