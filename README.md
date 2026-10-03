@@ -13,9 +13,13 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e .                 # add '.[dev]' for tests
 brew install universal-ctags     # C/C++ code-quality checks
 cp /path/to/Joint-Teapot/.env .env   # same variable names; see .env.example
-gradehelper roster sync          # hteams.csv from Canvas groups (once, and after team changes)
+gradehelper roster sync          # hteams.csv from Canvas hteam groups; rerun after drops/team changes
 gradehelper doctor               # checks config, credentials, ctags, roster
 ```
+
+`roster sync` lists what changed (left the course, no longer in a team, moved, joined) and
+asks before overwriting `hteams.csv`; students without a team stay in the file but are not
+graded. Only `hteams.csv` is used; the legacy `hteams.json` / `p3teams.json` can be deleted.
 
 Git access uses SSH (`GIT_HOST`, default `ssh://git@focs.gc.sjtu.edu.cn:2222`); repositories are
 cached in `repos/`.

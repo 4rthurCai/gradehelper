@@ -18,7 +18,7 @@ from gradehelper.roster import load_roster, roster_from_canvas, save_roster
 from gradehelper.upload import apply_upload, ledger_path, plan_upload
 from gradehelper.web.app import create_app
 
-from .conftest import ALICE, BOB, CAROL, DAVE, ns
+from .conftest import ALICE, BOB, CAROL, DAVE, LONER, ns
 
 
 def seed_results(ws) -> None:
@@ -293,3 +293,46 @@ def test_individual_aliases_and_short_help(alias):
 def test_short_aliases_for_group_and_final():
     assert "Alias: g" in CliRunner().invoke(cli.app, ["g", "-h"]).output
     assert "Alias: f" in CliRunner().invoke(cli.app, ["f", "-h"]).output
+
+
+def test_roster_diff_categories():
+    from gradehelper.models import Roster, Student
+    from gradehelper.roster import JOINED_COURSE, JOINED_TEAM, LEFT_COURSE, LEFT_TEAM, MOVED, diff_rosters
+
+    newcomer = Student("520000000006", "Sun Qi", "sunqi", "hteam-02")
+    old = Roster((ALICE, BOB, CAROL, DAVE, LONER))
+    new = Roster((
+        ALICE,  # unchanged
+        Student(BOB.id, BOB.name, BOB.jaccount, ""),  # removed from his team
+        Student(CAROL.id, CAROL.name, CAROL.jaccount, "hteam-01"),  # moved
+        Student(LONER.id, LONER.name, LONER.jaccount, "hteam-02"),  # got a team
+        newcomer,  # joined the course; DAVE dropped it
+    ))
+    changes = diff_rosters(old, new)
+    assert {(c.kind, c.student.id, c.before, c.after) for c in changes} == {
+        (LEFT_COURSE, DAVE.id, "hteam-02", ""),
+        (LEFT_TEAM, BOB.id, "hteam-01", ""),
+        (MOVED, CAROL.id, "hteam-02", "hteam-01"),
+        (JOINED_TEAM, LONER.id, "", "hteam-02"),
+        (JOINED_COURSE, newcomer.id, "", "hteam-02"),
+    }
+    assert changes[0].kind == LEFT_COURSE
+    assert diff_rosters(old, old) == []
+
+
+def test_cli_roster_sync_shows_changes_and_can_decline(workspace, monkeypatch):
+    from gradehelper.clients import canvas as canvas_client
+
+    monkeypatch.chdir(workspace.root)
+    users = [canvas_user(1, ALICE), canvas_user(2, BOB)]  # Carol and Dave dropped
+    groups = [ns(name="hteam 1", get_memberships=lambda: [ns(user_id=1)])]  # Bob left the team
+    course = ns(get_users=lambda enrollment_type: users, get_groups=lambda: groups)
+    monkeypatch.setattr(canvas_client.CanvasClient, "__init__", lambda self, secrets: None)
+    monkeypatch.setattr(canvas_client.CanvasClient, "course", course, raising=False)
+    before = (workspace.root / "hteams.csv").read_text(encoding="utf-8")
+    out = CliRunner().invoke(cli.app, ["roster", "sync"], input="n\n").output
+    assert "3 left the course" in out and "1 no longer in a team" in out and "Li Si" in out
+    assert "not saved" in out
+    assert (workspace.root / "hteams.csv").read_text(encoding="utf-8") == before
+    CliRunner().invoke(cli.app, ["roster", "sync", "--yes"])
+    assert "520000000003" not in (workspace.root / "hteams.csv").read_text(encoding="utf-8")

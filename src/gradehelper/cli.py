@@ -21,7 +21,7 @@ from .late_issues import late_teams, open_late_issues, plan_late_issues
 from .notify import build_warnings, send_warnings
 from .pipeline import Grader, suggest_stage
 from .report import HandEditedError, Row, read_final_csv
-from .roster import load_roster, roster_from_canvas, save_roster
+from .roster import CHANGE_ORDER, diff_rosters, load_roster, roster_from_canvas, save_roster
 from .upload import apply_upload, ledger_path, plan_upload
 
 HELP = {"help_option_names": ["-h", "--help"]}
@@ -359,20 +359,25 @@ def doctor() -> None:
 @roster_app.command("sync")
 @_guard
 def roster_sync(yes: Yes = False) -> None:
-    """Fetch students and hteam groups from Canvas into hteams.csv."""
+    """Re-fetch students and hteam groups from Canvas into hteams.csv (shows changes, asks first)."""
     ws = _workspace()
     from .clients.canvas import CanvasClient
 
     roster, emails = roster_from_canvas(CanvasClient(ws.secrets).course)
     old = load_roster(ws.roster_path) if ws.roster_path.exists() else None
     if old is not None:
-        before = {s.id: s.team for s in old.students}
-        after = {s.id: s.team for s in roster.students}
-        changes = [sid for sid in before.keys() | after.keys() if before.get(sid) != after.get(sid)]
-        console.print(f"{len(changes)} students added, removed or moved between teams")
-        for sid in sorted(changes)[:20]:
-            console.print(f"  {sid}: {before.get(sid, '-') or '(none)'} -> {after.get(sid, '-') or '(none)'}")
+        changes = diff_rosters(old, roster)
+        if not changes:
+            console.print("no team changes on Canvas")
+        for kind in CHANGE_ORDER:
+            group = [c for c in changes if c.kind == kind]
+            if group:
+                console.print(f"[bold]{len(group)} {kind}[/bold]")
+            for c in group:
+                move = f"{c.before or '(no team)'} -> {c.after or '(no team)'}"
+                console.print(f"  {escape(c.student.display_name)} ({c.student.id}): {move}")
         if changes and not yes and not typer.confirm(f"overwrite {ws.roster_path.name}?"):
+            console.print("not saved")
             raise typer.Exit()
     save_roster(ws.roster_path, roster, emails)
     console.print(f"saved {len(roster.students)} students, {len(roster.teams)} teams to {ws.roster_path}")

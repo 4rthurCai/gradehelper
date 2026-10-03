@@ -249,8 +249,10 @@ engr151-joj 的 `master` 分支上找不到这份作业的 `conf-release.json`�
 **`[deadlines]` 报错 `Extra inputs are not permitted`**
 `[deadlines]` 只接受 `individual`、`group`、`final` 三个字段。旧版的 `review` 已经取消：第 3 轮的 review 截止时间就是 +24h。
 
-**改了分组**
-重新运行 `gradehelper roster sync`。它会先列出变动，确认后才覆盖 `hteams.csv`。
+**有人退课或换组（开学前几周常见）**
+重新运行 `gradehelper roster sync`。它会从 Canvas 重新拉取学生和 hteam 分组，按类别列出变化：退课、不再在任何 team、换 team、加入 team、新加入课程。确认后才覆盖 `hteams.csv`。不在任何 team 的学生会保留在文件里，但不参与评分。
+
+工具只用 `hteams.csv`。旧版的 `hteams.json`、`p3teams.json` 已经不再需要，可以删除。
 
 **看详细日志**
 所有运行记录都在 `gradehelper.log`。

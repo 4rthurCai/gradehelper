@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from .models import Roster, Student, team_number
@@ -76,3 +77,35 @@ def roster_from_canvas(course) -> tuple[Roster, dict[str, str]]:
             )
         )
     return Roster(tuple(students)), emails
+
+
+LEFT_COURSE = "left the course"
+JOINED_COURSE = "joined the course"
+LEFT_TEAM = "no longer in a team"
+JOINED_TEAM = "added to a team"
+MOVED = "moved to another team"
+CHANGE_ORDER = (LEFT_COURSE, LEFT_TEAM, MOVED, JOINED_TEAM, JOINED_COURSE)
+
+
+@dataclass(frozen=True)
+class RosterChange:
+    kind: str
+    student: Student
+    before: str  # team before ("" = none)
+    after: str
+
+
+def diff_rosters(old: Roster, new: Roster) -> list[RosterChange]:
+    """What a sync would change, grouped by kind (order of CHANGE_ORDER), then by team."""
+    before, after = old.by_id(), new.by_id()
+    changes = []
+    for sid in before.keys() | after.keys():
+        b, a = before.get(sid), after.get(sid)
+        if b is None:
+            changes.append(RosterChange(JOINED_COURSE, a, "", a.team))
+        elif a is None:
+            changes.append(RosterChange(LEFT_COURSE, b, b.team, ""))
+        elif b.team != a.team:
+            kind = LEFT_TEAM if not a.team else JOINED_TEAM if not b.team else MOVED
+            changes.append(RosterChange(kind, a, b.team, a.team))
+    return sorted(changes, key=lambda c: (CHANGE_ORDER.index(c.kind), c.before or c.after, c.student.id))
