@@ -30,11 +30,15 @@ pass_threshold = 300           # JOJ hN total at/above this passes all JOJ check
 mandatory = ["main.c", "ex1.c"]
 optional = ["ex1.h"]
 
-[deadlines]
-individual = "2026-10-08T23:59:59+08:00"
-group = "2026-10-10T23:59:59+08:00"
-# final = ...                  # +1 day run; defaults to group + final_grace_hours
+[deadlines]                    # normally empty, see below
 ```
+
+Deadlines come from the Canvas assignment named `hN`: group = its due date, final = its
+"available until" date (else group + `final_grace_hours`), individual = group minus
+`individual_days_before_group` (2) days. `gradehelper doctor` lists them all and every run
+says where they came from. To override, set `individual`, `group` or `final` in
+`[deadlines]` (with a UTC offset); with `group` set, Canvas is not contacted. If several
+Canvas assignments start with `hN`, set `canvas_assignment_id`.
 
 JOJ exercise maxima need no configuration: they are read from the JOJ3 configs in
 engr151-joj (`master`): `hN/conf-release.json` gives the graded exercises and the release

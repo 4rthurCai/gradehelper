@@ -12,11 +12,14 @@
       <span class="chip">{{ hw.language }}</span>
     </div>
     <p class="muted" style="margin: 6px 0">
-      Individual deadline: {{ hw.deadlines.individual or "not set" }}<br>
-      Group deadline: {{ hw.deadlines.group or "not set" }}
+      {% set d = hw.deadlines %}
+      Individual {{ d.individual.strftime("%m-%d %H:%M") if d.individual else "–" }} ·
+      group {{ d.group.strftime("%m-%d %H:%M") if d.group else "–" }} ·
+      final {{ d.final.strftime("%m-%d %H:%M") if d.final else "–" }}<br>
+      <span style="font-size: 12px">{{ item.source }}</span>
     </p>
     <div class="row">
-      {% for stage in ["individual", "group"] %}
+      {% for stage in ["individual", "group", "final"] %}
         {% if stage in item.results %}
           <span class="chip ok">{{ stage }} · {{ item.results[stage].generated_at[:16].replace("T", " ") }} UTC</span>
         {% else %}
@@ -24,11 +27,13 @@
         {% endif %}
       {% endfor %}
     </div>
+    {% if item.suggested %}
     <p style="margin: 10px 0 6px">Suggested: <strong>{{ item.suggested }}</strong> <span class="muted">({{ item.reason }})</span></p>
     <form method="post" action="/hw/{{ hw.number }}/run/{{ item.suggested }}" class="row">
       <input type="text" name="teams" placeholder="teams, e.g. 1,5 (blank = all)" size="22">
       <button class="primary" {% if jobs.busy %}disabled{% endif %}>Run {{ item.suggested }}</button>
     </form>
+    {% else %}<div class="notice bad">{{ item.reason }}</div>{% endif %}
   </section>
 {% endfor %}
 </div>

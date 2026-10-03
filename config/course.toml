@@ -7,7 +7,11 @@ default_pass_threshold = 50
 workers = 8                 # teams checked in parallel
 roster_file = "hteams.csv"  # Name,ID,Email,Team  (refresh: gradehelper roster sync)
 output_dir = "hws"
-final_grace_hours = 24      # the "group deadline + 1 day" run; per homework: [deadlines] final = ...
+# Deadlines come from the Canvas assignment hN: group = due date, final = "available until"
+# (else group + final_grace_hours), individual = group - individual_days_before_group.
+final_grace_hours = 24
+individual_days_before_group = 2
+timezone = "Asia/Shanghai"  # for display; comparisons are timezone-aware
 
 # Rubric. Order here = order in student comments. stage decides which run produces it.
 [rubric.indvFailSubmit]

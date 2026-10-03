@@ -1,4 +1,4 @@
-# h5. Fill in deadlines so `gradehelper run h5` can pick the stage by itself.
+# h5
 language = "c"
 pass_threshold = 100  # JOJ h5 total at/above this passes all JOJ checks
 mandatory = ["CMakeLists.txt", "Makefile", "homework.h", "main.c", "ex3.c", "ex5.c", "ex6.c"]
@@ -6,9 +6,9 @@ optional = ["ex1.c", "ex2.c", "ex4.c", "ex1.h", "ex2.h", "ex3.h", "ex4.h", "ex5.
 # canvas_assignment_id = 0  # only needed if several assignments start with this hN
 
 [deadlines]
-# individual = "2026-10-01T23:59:59+08:00"
-# group = "2026-10-03T23:59:59+08:00"
-# final = ...   # the "+1 day" run; defaults to group + final_grace_hours
+# Read from the Canvas assignment: group = due date, final = "available until",
+# individual = group - 2 days. Set a value here only to override Canvas, e.g.:
+# group = "2026-10-02T23:59:00+08:00"
 
 # JOJ exercise maxima are read from the JOJ3 configs in engr151-joj (master branch):
 # hN/exK/conf.json (individual) and hN/conf-release.json (release, graded exercises).

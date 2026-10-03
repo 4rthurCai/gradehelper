@@ -11,7 +11,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from ..config import RUNS, STAGE_FINAL, STAGE_GROUP, STAGE_INDIVIDUAL, Workspace
+from ..config import RUNS, STAGE_FINAL, STAGE_GROUP, STAGE_INDIVIDUAL, ConfigError, Workspace
 from ..grading import fmt_points
 from ..late_issues import late_teams, open_late_issues, plan_late_issues
 from ..notify import build_warnings, send_warnings
@@ -58,8 +58,14 @@ def create_app(ws: Workspace) -> FastAPI:
         for n in ws.homework_numbers():
             g = grader(n)
             results = g.results()
-            stage, reason = suggest_stage(g.hw, g.run_times(), ws.course.final_grace_hours)
-            homeworks.append({"hw": g.hw, "results": results, "suggested": stage, "reason": reason})
+            try:
+                hw, source = g.scheduled, g.deadline_source
+            except ConfigError as e:
+                homeworks.append({"hw": g.hw, "results": results, "suggested": None, "reason": str(e),
+                                  "source": ""})
+                continue
+            stage, reason = suggest_stage(hw, g.run_times(), ws.course.final_grace_hours)
+            homeworks.append({"hw": hw, "results": results, "suggested": stage, "reason": reason, "source": source})
         return render(request, "index.html", homeworks=homeworks)
 
     @app.get("/hw/{hw}", response_class=HTMLResponse)

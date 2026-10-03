@@ -159,8 +159,9 @@ def _guard(fn):
 def run(hw: Hw, teams: Teams = "", warn: Warn = False, yes: Yes = False, overwrite: Overwrite = False) -> None:
     """One click: pick individual / group / final from the configured deadlines and run it."""
     grader = _grader(hw, teams, overwrite)
-    stage, reason = suggest_stage(grader.hw, grader.run_times(), grader.ws.course.final_grace_hours)
-    console.print(f"[bold]{grader.hw.name}: {stage} stage[/bold] ({reason})")
+    stage, reason = suggest_stage(grader.scheduled, grader.run_times(), grader.ws.course.final_grace_hours)
+    console.print(f"[dim]deadlines from {escape(grader.deadline_source)}[/dim]")
+    console.print(f"[bold]{grader.hw.name}: {stage} stage[/bold] ({escape(reason)})")
     if not yes and not typer.confirm("continue?", default=True):
         raise typer.Exit()
     _run_stage(grader, stage, None, warn, yes)
@@ -330,10 +331,11 @@ def doctor() -> None:
         raise typer.Exit(1) from e
     for n in ws.homework_numbers():
         try:
-            h = ws.homework(n)
-            dl = h.deadlines
-            report(True, f"h{n}: {h.language}, {len(h.mandatory)} mandatory files, "
-                         f"deadlines {dl.individual or '-'} / {dl.group or '-'}")
+            g = Grader(ws, n)
+            h, dl = g.hw, g.deadlines
+            report(True, f"h{n}: {h.language}, {len(h.mandatory)} mandatory files; deadlines from "
+                         f"{g.deadline_source}: individual {dl.individual:%m-%d %H:%M}, "
+                         f"group {dl.group:%m-%d %H:%M}, final {dl.final:%m-%d %H:%M}")
         except ConfigError as e:
             report(False, str(e))
     s = ws.secrets

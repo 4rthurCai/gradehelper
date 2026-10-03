@@ -26,7 +26,8 @@ from .clients.canvas import CanvasClient
 from .clients.git import GitRepos
 from .clients.gitea import GiteaClient
 from .clients.mattermost import MattermostClient
-from .config import RUNS, STAGE_FINAL, STAGE_GROUP, STAGE_INDIVIDUAL, HomeworkConfig, Workspace
+from .config import RUNS, STAGE_FINAL, STAGE_GROUP, STAGE_INDIVIDUAL, Deadlines, HomeworkConfig, Workspace
+from .deadlines import fetch_canvas_dates, resolve_deadlines
 from .models import Finding, Roster, StageResult, StudentMeta, Team, as_datetime
 from .overrides import load_overrides, overrides_path
 from .report import (
@@ -74,7 +75,25 @@ class Grader:
 
     @cached_property
     def hw(self) -> HomeworkConfig:
+        """hN.toml as written (no network)."""
         return self.ws.homework(self.hw_number)
+
+    @cached_property
+    def _resolved(self) -> tuple[HomeworkConfig, str]:
+        return resolve_deadlines(self.hw, self.ws.course, lambda: fetch_canvas_dates(self.ws.secrets))
+
+    @property
+    def scheduled(self) -> HomeworkConfig:
+        """hN.toml with all deadlines filled in (from Canvas unless hN.toml sets them)."""
+        return self._resolved[0]
+
+    @property
+    def deadlines(self) -> Deadlines:
+        return self.scheduled.deadlines
+
+    @property
+    def deadline_source(self) -> str:
+        return self._resolved[1]
 
     @cached_property
     def full_roster(self) -> Roster:
@@ -144,7 +163,7 @@ class Grader:
         return joj.check_joj(board, self.roster.graded, self.hw, exercises, self.ws.course.joj, flag_missing)
 
     def run_individual(self, deadline: datetime | None = None, check_branches: bool = True) -> StageResult:
-        deadline = deadline or self.hw.deadlines.individual
+        deadline = deadline or self.deadlines.individual
         findings: list[Finding] = []
         if check_branches:
             ctx = RepoContext(self.ws.course, self.hw, self.git)
@@ -203,11 +222,11 @@ class Grader:
 
     def run_group(self, deadline: datetime | None = None) -> StageResult:
         """At the group deadline: reviews and release runs count up to that time."""
-        return self._run_group_checks(STAGE_GROUP, deadline or self.hw.deadlines.group)
+        return self._run_group_checks(STAGE_GROUP, deadline or self.deadlines.group)
 
     def run_final(self, deadline: datetime | None = None) -> StageResult:
         """At group deadline + grace: grade late releases too, but keep 'late' as it was."""
-        cutoff = deadline or self.hw.deadlines.final_cutoff(self.ws.course.final_grace_hours)
+        cutoff = deadline or self.deadlines.final_cutoff(self.ws.course.final_grace_hours)
         return self._run_group_checks(STAGE_FINAL, cutoff)
 
     def _run_group_checks(self, stage: str, cutoff: datetime | None) -> StageResult:
@@ -215,7 +234,7 @@ class Grader:
             self.progress("no individual result yet: generating it from PRs + JOJ only (branches not checked)")
             self.run_individual(check_branches=False)
 
-        late_after = self.hw.deadlines.group or cutoff
+        late_after = self.deadlines.group or cutoff
         ctx = RepoContext(self.ws.course, self.hw, self.git)
         teams = self.roster.teams
         self.progress(f"{stage}: tag, reviews, release for {len(teams)} teams (cutoff {cutoff})")

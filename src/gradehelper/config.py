@@ -120,6 +120,8 @@ class LateIssueSettings(BaseModel):
 class CourseConfig(BaseModel):
     score_floor: float = -2.5
     final_grace_hours: float = 24
+    individual_days_before_group: float = 2
+    timezone: str = "Asia/Shanghai"
     default_language: str = "matlab"
     default_pass_threshold: float = 50
     workers: int = 8

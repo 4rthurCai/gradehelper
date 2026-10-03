@@ -34,11 +34,20 @@ pass_threshold = 300           # 个人 JOJ 的 hN 总分达到这个值，个�
 mandatory = ["main.c", "ex1.c"]
 optional = ["ex1.h"]
 
-[deadlines]                    # 必须带时区 +08:00
-individual = "2026-10-08T23:59:59+08:00"
-group = "2026-10-10T23:59:59+08:00"
-# final = ...                  # 第 3 轮截止时间，默认 group + 24h（course.toml 的 final_grace_hours）
+[deadlines]                    # 一般不用填，见下文
 ```
+
+**deadline 不用填。** 工具会从 Canvas 上名为 `hN` 的作业自动读取：
+
+| deadline | 来源 |
+| --- | --- |
+| 小组 deadline | Canvas 作业的截止时间（due） |
+| 第 3 轮截止时间 | Canvas 作业的「可用截止」时间（available until / lock）；没有设置时用小组 deadline + 24h |
+| 个人 deadline | 小组 deadline 往前推 2 天（`course.toml` 的 `individual_days_before_group`） |
+
+- 每次运行都会显示 deadline 的来源，`gradehelper doctor` 会列出所有作业的三个时间。
+- 需要覆盖时，在 `[deadlines]` 里写 `individual`、`group` 或 `final`（必须带时区，例如 `"2026-10-02T23:59:00+08:00"`）。只要写了 `group`，就完全不会访问 Canvas。
+- 如果 Canvas 上有多个作业名都以 `hN` 开头，在 `hN.toml` 里写 `canvas_assignment_id` 指定是哪一个。
 
 **JOJ 每题满分不用填。** 工具会从 engr151-joj 仓库 `master` 分支的 JOJ3 配置里自动读取：
 
