@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 
 from .clients.mattermost import MattermostClient
+from .config import JojSettings
 from .report import Row
 
 log = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ ADVICE = {
         "describe what you implemented, bugs met and a self-evaluation"
     ),
     "jojFailHomework": "your JOJ homework score is below the passing line",
-    "jojFailExercise": "some JOJ exercises score below 25%",
+    "jojFailExercise": "some JOJ exercises score below {exercise_percent:g}% of their full mark",
     "groupFailSubmit": "your team's release (tag) is missing or incomplete; create it as soon as possible",
     "groupUntidy": "your team's release contains extra files",
     "groupLowCodeQuality": "your team's code has quality issues",
@@ -39,10 +40,11 @@ class StudentWarning:
     text: str
 
 
-def build_warnings(rows: list[Row], hw: str) -> list[StudentWarning]:
+def build_warnings(rows: list[Row], hw: str, joj: JojSettings) -> list[StudentWarning]:
+    thresholds = {"exercise_percent": joj.individual.exercise_fail_percent}
     warnings = []
     for row in rows:
-        lines = [f"- {ADVICE[d.key]}" for d in row.grade.deductions if d.key in ADVICE]
+        lines = [f"- {ADVICE[d.key].format(**thresholds)}" for d in row.grade.deductions if d.key in ADVICE]
         if not lines:
             continue
         details = f"\nDetails: {', '.join(row.grade.details)}" if row.grade.details else ""

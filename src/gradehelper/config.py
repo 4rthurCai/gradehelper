@@ -34,6 +34,7 @@ class Secrets(BaseSettings):
     gitea_domain_name: str = "focs.gc.sjtu.edu.cn"
     gitea_suffix: str = "/git"
     gitea_access_token: str = ""
+    gitea_bot_access_token: str = ""  # bot-engr151; used only to open late-submission issues
     gitea_org_name: str = ""
 
     git_host: str = "ssh://git@focs.gc.sjtu.edu.cn:2222"
@@ -85,14 +86,20 @@ class JojSettings(BaseModel):
     branch: str = "grading"
     scoreboard_path: str = "homework/h{hw}.csv"
     # JOJ3 opens "JOJ3 Result for h1-release by @user - Score: 100 / 100" in the team repo.
-    release_issue_title: str = r"JOJ3 Result for {hw}-release by .* - Score: (\d+) / (\d+)"
+    release_issue_title: str = (
+        r"JOJ3 Result for {hw}-release by .* - Score: (\d+) / (\d+)"
+    )
     # JOJ3 configs, for per-exercise maxima (see checks/joj_config.py).
     config_branch: str = "master"
     config_dir: str = "home/tt/.config/joj/homework"
     # Commit status of the release workflow; failure/error (red cross) = jojFailCompile.
     release_status_context: str = "Run JOJ3 on Release"
-    individual: JojThresholds = JojThresholds(exercise_fail_percent=10, homework_fail_percent=25)
-    group: JojThresholds = JojThresholds(exercise_fail_percent=25, homework_fail_percent=50)
+    individual: JojThresholds = JojThresholds(
+        exercise_fail_percent=10, homework_fail_percent=25
+    )
+    group: JojThresholds = JojThresholds(
+        exercise_fail_percent=25, homework_fail_percent=50
+    )
 
 
 class LayoutSettings(BaseModel):
@@ -114,7 +121,9 @@ class PrDescriptionSettings(BaseModel):
 
 class LateIssueSettings(BaseModel):
     title: str = "{hw} feedback"
-    body: str = "Late submission, no feedback provided."
+    body: str = (
+        "Late submission, no feedback provided.\n\nGetting this message doesn't mean feedback stage is over."
+    )
 
 
 class CourseConfig(BaseModel):
@@ -149,7 +158,9 @@ class Deadlines(BaseModel):
     @classmethod
     def _timezone_aware(cls, value: datetime | None) -> datetime | None:
         if value is not None and value.tzinfo is None:
-            raise ValueError("deadlines need a UTC offset, e.g. 2026-10-02T23:59:59+08:00")
+            raise ValueError(
+                "deadlines need a UTC offset, e.g. 2026-10-02T23:59:59+08:00"
+            )
         return value
 
     def final_cutoff(self, grace_hours: float) -> datetime | None:
@@ -165,8 +176,12 @@ class HomeworkConfig(BaseModel):
     mandatory: list[str] = Field(default_factory=list)
     optional: list[str] = Field(default_factory=list)
     # Optional overrides; by default both come from the JOJ3 configs in the joj repo.
-    joj_exercises: dict[int, float] = Field(default_factory=dict)  # individual max; 0 = not graded
-    joj_release_exercises: dict[str, float] = Field(default_factory=dict)  # release max, {"ex2": 45}
+    joj_exercises: dict[int, float] = Field(
+        default_factory=dict
+    )  # individual max; 0 = not graded
+    joj_release_exercises: dict[str, float] = Field(
+        default_factory=dict
+    )  # release max, {"ex2": 45}
     deadlines: Deadlines = Deadlines()
     canvas_assignment_id: int | None = None
 
@@ -180,7 +195,6 @@ class HomeworkConfig(BaseModel):
     @property
     def name(self) -> str:
         return f"h{self.number}"
-
 
 
 def _read_toml(path: Path) -> dict:
@@ -205,7 +219,9 @@ class Workspace:
 
     @cached_property
     def course(self) -> CourseConfig:
-        return CourseConfig.model_validate(_read_toml(self.root / "config" / "course.toml"))
+        return CourseConfig.model_validate(
+            _read_toml(self.root / "config" / "course.toml")
+        )
 
     def homework(self, number: int) -> HomeworkConfig:
         path = self.root / "config" / "homeworks" / f"h{number}.toml"
@@ -214,7 +230,9 @@ class Workspace:
         data = {
             "number": number,
             "language": raw.pop("language", self.course.default_language),
-            "pass_threshold": raw.pop("pass_threshold", self.course.default_pass_threshold),
+            "pass_threshold": raw.pop(
+                "pass_threshold", self.course.default_pass_threshold
+            ),
             "joj_exercises": {int(k): v for k, v in joj.get("exercises", {}).items()},
             "joj_release_exercises": dict(joj.get("release", {})),
             **raw,

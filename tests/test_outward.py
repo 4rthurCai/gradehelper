@@ -74,8 +74,9 @@ def canvas_user(i, student, **extra):
 def test_warnings_are_per_stage_and_combined(workspace):
     seed_results(workspace)
     g = Grader(workspace, 1)
-    individual = {w.student_id: w for w in build_warnings(g.rows(STAGE_INDIVIDUAL, stage_only=True), "h1")}
-    group = {w.student_id for w in build_warnings(g.rows(STAGE_GROUP, stage_only=True), "h1")}
+    joj = workspace.course.joj
+    individual = {w.student_id: w for w in build_warnings(g.rows(STAGE_INDIVIDUAL, stage_only=True), "h1", joj)}
+    group = {w.student_id for w in build_warnings(g.rows(STAGE_GROUP, stage_only=True), "h1", joj)}
     assert set(individual) == {BOB.id, CAROL.id}
     assert "individual branch missing" in individual[BOB.id].text
     assert individual[BOB.id].text.endswith(f"@{BOB.jaccount}")
@@ -84,6 +85,20 @@ def test_warnings_are_per_stage_and_combined(workspace):
     mm = FakeMattermost(fail_for={CAROL.id})
     sent, failures = send_warnings(mm, list(individual.values()))
     assert sent == 1 and len(failures) == 1 and mm.sent[0][0] == BOB.id
+
+
+def test_joj_exercise_warning_uses_the_configured_threshold(workspace):
+    save_result(result_path(workspace.output_dir, 1, STAGE_INDIVIDUAL), StageResult(
+        1, STAGE_INDIVIDUAL, "2026-10-02T00:00:00+00:00", students=(ALICE.id,),
+        findings=(Finding(ALICE.id, "jojFailExercise", 1, ("ex2 0/20",)),),
+    ))
+    g = Grader(workspace, 1)
+    rows = g.rows(STAGE_INDIVIDUAL, stage_only=True)
+    joj = workspace.course.joj
+    [warning] = build_warnings(rows, "h1", joj)
+    assert f"below {joj.individual.exercise_fail_percent:g}%" in warning.text
+    stricter = joj.model_copy(update={"individual": joj.individual.model_copy(update={"exercise_fail_percent": 15})})
+    assert "below 15%" in build_warnings(rows, "h1", stricter)[0].text
 
 
 # ---------- upload ----------
@@ -253,11 +268,55 @@ def test_late_issues_only_for_late_teams_and_skip_existing(workspace):
     plan = plan_late_issues(gitea, teams, "h1", LateIssueSettings())
     opened, failures = open_late_issues(gitea, plan)
     assert opened == ["hteam02#7"] and failures == []
-    assert gitea.created == [("hteam02", "h1 feedback", "Late submission, no feedback provided.", ("bot", "member"))]
+    assert gitea.created == [("hteam02", "h1 feedback", LateIssueSettings().body, ("bot", "member"))]
 
     again = FakeIssueGitea({"hteam02": {"h1 feedback"}})
     assert open_late_issues(again, plan_late_issues(again, teams, "h1", LateIssueSettings())) == ([], [])
     assert again.created == []
+
+
+def seed_late_team(ws) -> None:
+    """hteam-02 (Carol, Dave) had no release by the group deadline."""
+    late = {s.id: StudentMeta(s in (CAROL, DAVE)) for s in (ALICE, BOB, CAROL, DAVE)}
+    save_result(result_path(ws.output_dir, 1, STAGE_GROUP),
+                StageResult(1, STAGE_GROUP, "t", students=tuple(late), meta=late))
+
+
+def test_late_issues_are_opened_with_the_bot_token(workspace, monkeypatch):
+    from gradehelper import pipeline
+
+    seed_late_team(workspace)
+    (workspace.root / ".env").write_text(
+        "GITEA_ORG_NAME=org\nGITEA_ACCESS_TOKEN=ta\nGITEA_BOT_ACCESS_TOKEN=bot\n", encoding="utf-8"
+    )
+    clients = {}
+
+    class TokenGitea(FakeIssueGitea):
+        def __init__(self, secrets, token_field="gitea_access_token"):
+            super().__init__({})
+            self.token = getattr(secrets, token_field)
+            clients[self.token] = self
+
+        def collaborators(self, repo):
+            if self.token == "bot":  # the bot token only has write:issue, like the real one
+                raise PermissionError("required=[read:repository], token scope=write:issue")
+            return super().collaborators(repo)
+
+    monkeypatch.setattr(pipeline, "GiteaClient", TokenGitea)
+    monkeypatch.chdir(workspace.root)
+    result = CliRunner().invoke(cli.app, ["late-issues", "1", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert clients["bot"].created == [("hteam02", "h1 feedback", workspace.course.late_issue.body, ("bot", "member"))]
+    assert clients["ta"].created == []
+
+
+def test_late_issues_refuse_to_run_without_the_bot_token(workspace, monkeypatch):
+    seed_late_team(workspace)
+    monkeypatch.delenv("GITEA_BOT_ACCESS_TOKEN", raising=False)
+    monkeypatch.chdir(workspace.root)
+    result = CliRunner().invoke(cli.app, ["late-issues", "1", "--yes"])
+    assert result.exit_code != 0
+    assert "GITEA_BOT_ACCESS_TOKEN" in result.output and "Traceback" not in result.output
 
 
 def test_web_shows_three_runs_and_late_issue_page(web):

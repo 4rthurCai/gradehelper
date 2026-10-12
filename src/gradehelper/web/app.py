@@ -135,13 +135,13 @@ def create_app(ws: Workspace) -> FastAPI:
     @app.get("/hw/{hw}/warnings", response_class=HTMLResponse)
     def warnings_preview(request: Request, hw: int, stage: str = STAGE_INDIVIDUAL):
         g = grader(hw)
-        warnings = build_warnings(g.rows(stage, stage_only=True), g.hw.name)
+        warnings = build_warnings(g.rows(stage, stage_only=True), g.hw.name, g.ws.course.joj)
         return render(request, "warnings.html", g=g, stage=stage, warnings=warnings, sent=None)
 
     @app.post("/hw/{hw}/warnings", response_class=HTMLResponse)
     def warnings_send(request: Request, hw: int, stage: str = Form(...), count: int = Form(...)):
         g = grader(hw)
-        warnings = build_warnings(g.rows(stage, stage_only=True), g.hw.name)
+        warnings = build_warnings(g.rows(stage, stage_only=True), g.hw.name, g.ws.course.joj)
         if len(warnings) != count:
             raise HTTPException(409, "results changed since the preview; reload and check again")
         sent, failures = send_warnings(g.mattermost(), warnings)
@@ -191,6 +191,6 @@ def create_app(ws: Workspace) -> FastAPI:
         g, plan = _late_plan(hw)
         if sum(1 for p in plan if not p.exists) != count:
             raise HTTPException(409, "late teams changed since the preview; reload and check again")
-        return render(request, "late_issues.html", g=g, plan=plan, result=open_late_issues(g.gitea, plan))
+        return render(request, "late_issues.html", g=g, plan=plan, result=open_late_issues(g.bot_gitea, plan))
 
     return app

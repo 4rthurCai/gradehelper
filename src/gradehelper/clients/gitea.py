@@ -23,12 +23,12 @@ def list_all(method: Callable[..., list], *args: Any, **kwargs: Any) -> list:
 
 
 class GiteaClient:
-    def __init__(self, secrets: Secrets):
-        missing = secrets.missing("gitea_access_token", "gitea_org_name")
+    def __init__(self, secrets: Secrets, token_field: str = "gitea_access_token"):
+        missing = secrets.missing(token_field, "gitea_org_name")
         if missing:
             raise ConfigError(f"missing in .env: {', '.join(missing)}")
         configuration = focs_gitea.Configuration()
-        configuration.api_key["access_token"] = secrets.gitea_access_token
+        configuration.api_key["access_token"] = getattr(secrets, token_field)
         configuration.host = secrets.gitea_api_url
         for logger in configuration.logger.values():
             logger.handlers = []

@@ -128,4 +128,4 @@ unfilled_threshold = 0.6
 [late_issue]
 # Opened by `gradehelper late-issues hN` in repos of teams without an on-time release.
 title = "{hw} feedback"
-body = "Late submission, no feedback provided."
+body = "Late submission, no feedback provided.\n\nGetting this message doesn't mean feedback stage is over."

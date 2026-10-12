@@ -106,7 +106,7 @@ def _print_rows(rows: list[Row], title: str, only_issues: bool = False) -> None:
 
 
 def _warn(grader: Grader, stage: str, yes: bool) -> None:
-    warnings = build_warnings(grader.rows(stage, stage_only=True), grader.hw.name)
+    warnings = build_warnings(grader.rows(stage, stage_only=True), grader.hw.name, grader.ws.course.joj)
     if not warnings:
         console.print("[green]no warnings to send[/green]")
         return
@@ -210,6 +210,7 @@ def late_issues(hw: Hw, yes: Yes = False) -> None:
     if not teams:
         console.print(f"[green]no late teams (from the {source.stage} run)[/green]")
         return
+    bot = grader.bot_gitea  # checked before the preview: a missing GITEA_BOT_ACCESS_TOKEN stops here
     plan = plan_late_issues(grader.gitea, teams, grader.hw.name, grader.ws.course.late_issue)
     for item in plan:
         state = "[dim]already open, skipped[/dim]" if item.exists else "[yellow]will open[/yellow]"
@@ -221,7 +222,7 @@ def late_issues(hw: Hw, yes: Yes = False) -> None:
     if not yes and not typer.confirm(f"open {len(todo)} issue(s) on Gitea?"):
         console.print("not opened")
         return
-    opened, failures = open_late_issues(grader.gitea, plan)
+    opened, failures = open_late_issues(bot, plan)
     console.print(f"[green]opened {', '.join(opened) or 'none'}[/green]")
     for f in failures:
         console.print(f"  [red]{escape(f)}[/red]")
@@ -342,6 +343,7 @@ def doctor() -> None:
     for group_name, fields in {
         "Canvas": ("canvas_access_token", "canvas_course_id"),
         "Gitea": ("gitea_access_token", "gitea_org_name"),
+        "Gitea bot (late issues)": ("gitea_bot_access_token",),
         "Mattermost": ("mattermost_access_token", "mattermost_team"),
     }.items():
         missing = s.missing(*fields)

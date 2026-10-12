@@ -17,6 +17,7 @@ gradehelper roster sync              # 从 Canvas 的 hteam 分组生成 hteams.
 gradehelper doctor                   # 检查配置、凭据、ctags 和花名册
 ```
 
+- Gitea 默认用你自己的 `GITEA_ACCESS_TOKEN`。只有 `late-issues` 用 `GITEA_BOT_ACCESS_TOKEN`（bot-engr151 的 token），以 bot 身份开 issue；没填就不会运行。
 - 服务器默认是 `focs.gc.sjtu.edu.cn`。git 走 SSH（`GIT_HOST`，默认 `ssh://git@focs.gc.sjtu.edu.cn:2222`）。
 - 仓库缓存在 `repos/`。遇到防火墙断开连接会自动重试。
 
@@ -80,7 +81,7 @@ optional = ["ex1.h"]
 **第 3 轮之后：**
 
 1. 把 `hws/h3.csv` push 到 hw-scoreboard 仓库。
-2. 运行 `gradehelper late-issues 3`，给迟交的 team 开「Late submission, no feedback provided.」issue。
+2. 运行 `gradehelper late-issues 3`，以 bot-engr151 的身份给迟交的 team 开「Late submission, no feedback provided.」issue。
 3. TA 审阅并修改表格。
 4. pull 回最新的表格。
 5. 运行 `gradehelper upload 3`。

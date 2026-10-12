@@ -17,6 +17,9 @@ gradehelper roster sync          # hteams.csv from Canvas hteam groups; rerun af
 gradehelper doctor               # checks config, credentials, ctags, roster
 ```
 
+Gitea calls use your own `GITEA_ACCESS_TOKEN`, except `late-issues`, which opens the issues as the course
+bot with `GITEA_BOT_ACCESS_TOKEN` (bot-engr151) and refuses to run without it.
+
 `roster sync` lists what changed (left the course, no longer in a team, moved, joined) and
 asks before overwriting `hteams.csv`; students without a team stay in the file but are not
 graded. Only `hteams.csv` is used; the legacy `hteams.json` / `p3teams.json` can be deleted.

@@ -108,6 +108,11 @@ class Grader:
         return GiteaClient(self.ws.secrets)
 
     @cached_property
+    def bot_gitea(self) -> GiteaClient:
+        """The course bot account; late-submission issues are opened as the bot, not as a TA."""
+        return GiteaClient(self.ws.secrets, "gitea_bot_access_token")
+
+    @cached_property
     def git(self) -> GitRepos:
         s = self.ws.secrets
         return GitRepos(s.git_host, s.gitea_org_name, self.ws.repos_dir)
