@@ -11,9 +11,18 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from ..config import RUNS, STAGE_FINAL, STAGE_GROUP, STAGE_INDIVIDUAL, ConfigError, Workspace
+from ..config import (
+    GROUP_RUNS,
+    RUNS,
+    STAGE_FINAL,
+    STAGE_GROUP,
+    STAGE_INDIVIDUAL,
+    STAGE_INDIVIDUAL_FINAL,
+    ConfigError,
+    Workspace,
+)
+from ..feedback import plan_feedback, post_feedback
 from ..grading import fmt_points
-from ..late_issues import late_teams, open_late_issues, plan_late_issues
 from ..notify import build_warnings, send_warnings
 from ..overrides import Override, load_overrides, overrides_path, save_overrides
 from ..pipeline import Grader, suggest_stage
@@ -64,7 +73,8 @@ def create_app(ws: Workspace) -> FastAPI:
                 homeworks.append({"hw": g.hw, "results": results, "suggested": None, "reason": str(e),
                                   "source": ""})
                 continue
-            stage, reason = suggest_stage(hw, g.run_times(), ws.course.final_grace_hours)
+            stage, reason = suggest_stage(hw, g.run_times(), ws.course.final_grace_hours,
+                                          individual_grace_hours=ws.course.individual_grace_hours)
             homeworks.append({"hw": hw, "results": results, "suggested": stage, "reason": reason, "source": source})
         return render(request, "index.html", homeworks=homeworks)
 
@@ -72,7 +82,7 @@ def create_app(ws: Workspace) -> FastAPI:
     def homework(request: Request, hw: int, stage: str = "", issues: bool = False):
         g = grader(hw)
         results = g.results()
-        stage = stage if stage in RUNS else (g.latest_group_stage() or STAGE_INDIVIDUAL)
+        stage = stage if stage in RUNS else g.latest_stage()
         problems = g.write_reports()
         rows = g.rows(stage)
         if issues:
@@ -94,7 +104,8 @@ def create_app(ws: Workspace) -> FastAPI:
 
         def work(job):
             g = Grader(ws, hw, teams, progress=job.say)
-            {STAGE_INDIVIDUAL: g.run_individual, STAGE_GROUP: g.run_group, STAGE_FINAL: g.run_final}[stage](when)
+            {STAGE_INDIVIDUAL: g.run_individual, STAGE_INDIVIDUAL_FINAL: g.run_individual_final,
+             STAGE_GROUP: g.run_group, STAGE_FINAL: g.run_final}[stage](when)
 
         try:
             jobs.start(f"h{hw} {stage}" + (f" (teams {teams})" if teams else ""), work)
@@ -149,7 +160,7 @@ def create_app(ws: Workspace) -> FastAPI:
 
     def _plan(hw: int, force: bool):
         g = grader(hw)
-        rows = read_final_csv(ws.output_dir / f"h{hw}.csv")
+        rows = read_final_csv(g.upload_source())
         canvas = g.canvas()
         assignment = canvas.find_assignment(hw, g.hw.canvas_assignment_id)
         plan = plan_upload(rows, assignment, canvas.students(), ledger_path(ws.output_dir, hw), force)
@@ -174,23 +185,28 @@ def create_app(ws: Workspace) -> FastAPI:
         return render(request, "upload.html", g=g, assignment=assignment, plan=plan, digest=digest,
                       force=force, result=result, error="")
 
-    def _late_plan(hw: int):
+    def _feedback_plan(hw: int, stage: str):
         g = grader(hw)
-        results = g.results()
-        source = next((results[s] for s in (STAGE_GROUP, STAGE_FINAL) if s in results), None)
-        teams = late_teams(g.full_roster, source) if source else []
-        return g, plan_late_issues(g.gitea, teams, g.hw.name, ws.course.late_issue) if teams else []
+        if stage not in GROUP_RUNS:
+            raise HTTPException(404)
+        if stage not in g.results():
+            return g, None, ""
+        plan = plan_feedback(g.gitea, stage, g.rows(stage, stage_only=True), g.roster.teams, g.hw.name,
+                             ws.course.feedback)
+        digest = _plan_digest([{"repo": p.team.repo, "action": p.action, "body": p.body} for p in plan if p.todo])
+        return g, plan, digest
 
-    @app.get("/hw/{hw}/late-issues", response_class=HTMLResponse)
-    def late_preview(request: Request, hw: int):
-        g, plan = _late_plan(hw)
-        return render(request, "late_issues.html", g=g, plan=plan, result=None)
+    @app.get("/hw/{hw}/feedback", response_class=HTMLResponse)
+    def feedback_preview(request: Request, hw: int, stage: str = STAGE_GROUP):
+        g, plan, digest = _feedback_plan(hw, stage)
+        return render(request, "feedback.html", g=g, stage=stage, plan=plan, digest=digest, result=None)
 
-    @app.post("/hw/{hw}/late-issues", response_class=HTMLResponse)
-    def late_open(request: Request, hw: int, count: int = Form(...)):
-        g, plan = _late_plan(hw)
-        if sum(1 for p in plan if not p.exists) != count:
-            raise HTTPException(409, "late teams changed since the preview; reload and check again")
-        return render(request, "late_issues.html", g=g, plan=plan, result=open_late_issues(g.bot_gitea, plan))
+    @app.post("/hw/{hw}/feedback", response_class=HTMLResponse)
+    def feedback_post(request: Request, hw: int, stage: str = Form(...), digest: str = Form(...)):
+        g, plan, current = _feedback_plan(hw, stage)
+        if plan is None or current != digest:
+            raise HTTPException(409, "results or issues changed since the preview; reload and check again")
+        result = post_feedback(g.bot_gitea, plan)
+        return render(request, "feedback.html", g=g, stage=stage, plan=plan, digest=digest, result=result)
 
     return app

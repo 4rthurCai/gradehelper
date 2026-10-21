@@ -41,6 +41,14 @@ def test_from_canvas_due_lock_and_derived_individual():
     assert "427173" in source
 
 
+def test_individual_final_is_individual_plus_grace_unless_set():
+    canvas = lambda: read_canvas_dates([assignment(1, "h1")])  # noqa: E731
+    d = resolve_deadlines(hw(), COURSE, canvas)[0].deadlines
+    assert d.individual_final == datetime(2026, 10, 1, 23, 59, tzinfo=CST)
+    own = datetime(2026, 10, 1, 12, 0, tzinfo=CST)
+    assert resolve_deadlines(hw(individual_final=own), COURSE, canvas)[0].deadlines.individual_final == own
+
+
 def test_missing_lock_falls_back_to_grace():
     canvas = lambda: read_canvas_dates([assignment(1, "h1", lock=None)])  # noqa: E731
     d = resolve_deadlines(hw(), COURSE, canvas)[0].deadlines

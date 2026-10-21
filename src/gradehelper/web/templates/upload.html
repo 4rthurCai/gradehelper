@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ g.hw.name }} upload · Grade Helper{% endblock %}
 {% block content %}
-<p><a href="/hw/{{ g.hw.number }}?stage=group">← {{ g.hw.name }}</a></p>
+<p><a href="/hw/{{ g.hw.number }}?stage=final">← {{ g.hw.name }}</a></p>
 <h1>Canvas upload</h1>
 {% if error %}
   <div class="notice bad">{{ error }}</div>

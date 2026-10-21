@@ -10,7 +10,7 @@ import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .config import STAGE_FINAL, STAGE_GROUP, STAGE_INDIVIDUAL, CourseConfig
+from .config import STAGE_FINAL, STAGE_GROUP, STAGE_INDIVIDUAL, STAGE_INDIVIDUAL_FINAL, CourseConfig
 from .grading import Grade, compute_grade, fmt_points
 from .models import Finding, Roster, StageResult, Student, StudentMeta
 from .overrides import Override, apply_overrides
@@ -18,14 +18,15 @@ from .overrides import Override, apply_overrides
 log = logging.getLogger(__name__)
 WRITTEN_STATE = ".gradehelper-written.json"  # not a CSV, so the hw-scoreboard repo ignores it
 
-INDIVIDUAL_HEADER = ["Name", "ID", "Jaccount", "Team", "Individual_Score", "Individual_Comments"]
+INDIVIDUAL_HEADER = ["Name", "ID", "Jaccount", "Team", "Individual_Score", "Individual_Comments", "TA Notes"]
 FINAL_HEADER = ["Name", "ID", "Jaccount", "Team", "Score", "Late", "Release Time", "Comments", "TA Notes"]
 
 
 # ---------- stage results ----------
 
 def result_path(output_dir: Path, hw: int, stage: str) -> Path:
-    suffix = {STAGE_INDIVIDUAL: "indv", STAGE_GROUP: "group", STAGE_FINAL: "final"}[stage]
+    suffix = {STAGE_INDIVIDUAL: "indv", STAGE_INDIVIDUAL_FINAL: "indv-final", STAGE_GROUP: "group",
+              STAGE_FINAL: "final"}[stage]
     return output_dir / f"h{hw}.{suffix}.json"
 
 
@@ -97,9 +98,16 @@ def build_rows(
         adjusted = apply_overrides(student, findings, overrides)
         kept = [f for f in adjusted.findings if f.key in rubric]
         grade = compute_grade(kept, rubric, course.score_floor, adjusted.notes, adjusted.fixed_score)
-        meta = next((r.meta[student.id] for r in results if student.id in r.meta), StudentMeta())
-        rows.append(Row(student, grade, meta))
+        rows.append(Row(student, grade, merge_meta([r.meta[student.id] for r in results if student.id in r.meta])))
     return rows
+
+
+def merge_meta(metas: list[StudentMeta]) -> StudentMeta:
+    """One student's flags across runs: late and release time come from the group run,
+    TA notes from every run (e.g. a fix after the individual deadline)."""
+    notes = tuple(dict.fromkeys(n for m in metas for n in m.notes))
+    release_time = next((m.release_time for m in reversed(metas) if m.release_time), "")
+    return StudentMeta(late=any(m.late for m in metas), release_time=release_time, notes=notes)
 
 
 class HandEditedError(Exception):
@@ -109,7 +117,7 @@ class HandEditedError(Exception):
 def write_individual_csv(path: Path, rows: list[Row], overwrite: bool = False) -> None:
     _write_guarded(path, INDIVIDUAL_HEADER, [
         [r.student.display_name, r.student.id, r.student.jaccount, r.student.team,
-         fmt_points(r.grade.score), r.grade.comment]
+         fmt_points(r.grade.score), r.grade.comment, "; ".join(r.meta.notes)]
         for r in rows
     ], overwrite)
 

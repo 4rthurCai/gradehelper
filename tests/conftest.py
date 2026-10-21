@@ -44,3 +44,35 @@ def ns(**kwargs) -> SimpleNamespace:
 
 def user(student_id: str, login: str = "") -> SimpleNamespace:
     return ns(full_name=f"{login or 'someone'} {student_id}", login=login or student_id)
+
+
+class FakeIssues:
+    """Gitea issue calls used by the feedback issues; records what would be posted."""
+
+
+    def __init__(self, issues=None, comments=None, fail_for=()):
+        self.issues = issues or {}
+        self.comments = comments or {}
+        self.fail_for = set(fail_for)
+        self.opened, self.replied = [], []
+
+    def repo_issues(self, repo):
+        return self.issues.get(repo, [])
+
+    def issue_comments(self, repo, number):
+        return self.comments.get((repo, number), [])
+
+    def collaborators(self, repo):
+        return ["bot", "member"]
+
+    def create_issue(self, repo, title, body, assignees):
+        if repo in self.fail_for:
+            raise RuntimeError("403 Forbidden")
+        self.opened.append((repo, title, body, tuple(assignees)))
+        return 7
+
+    def create_comment(self, repo, number, body):
+        if repo in self.fail_for:
+            raise RuntimeError("403 Forbidden")
+        self.replied.append((repo, number, body))
+        return 1

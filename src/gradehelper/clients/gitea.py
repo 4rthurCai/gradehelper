@@ -90,3 +90,10 @@ class GiteaClient:
     def create_issue(self, repo: str, title: str, body: str, assignees: list[str]) -> int:
         option = focs_gitea.CreateIssueOption(title=title, body=body, assignees=assignees)
         return self.issues.issue_create_issue(self.org, repo, body=option).number
+
+    def issue_comments(self, repo: str, number: int) -> list:
+        return self.issues.issue_get_comments(self.org, repo, number)
+
+    def create_comment(self, repo: str, number: int, body: str) -> int:
+        option = focs_gitea.CreateIssueCommentOption(body=body)
+        return self.issues.issue_create_comment(self.org, repo, number, body=option).id

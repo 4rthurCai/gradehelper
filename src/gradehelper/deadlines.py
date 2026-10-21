@@ -3,6 +3,7 @@
 group      = Canvas due date ("due_at")
 final      = Canvas "available until" ("lock_at"), else group + final_grace_hours
 individual = group - individual_days_before_group (course.toml)
+individual_final = individual + individual_grace_hours (the individual part is graded then)
 
 Values written in hN.toml [deadlines] win. If hN.toml sets the group deadline, Canvas is
 not contacted at all (offline use, tests).
@@ -76,7 +77,7 @@ def fetch_canvas_dates(secrets: Secrets) -> CanvasDates:
 def resolve_deadlines(
     hw: HomeworkConfig, course: CourseConfig, canvas: Callable[[], CanvasDates]
 ) -> tuple[HomeworkConfig, str]:
-    """Returns the homework with all three deadlines filled in, and where they came from."""
+    """Returns the homework with all deadlines filled in, and where they came from."""
     own = hw.deadlines
     if own.group is not None:
         group, lock, source = own.group, None, f"{hw.name}.toml"
@@ -97,8 +98,12 @@ def resolve_deadlines(
 
     tz = ZoneInfo(course.timezone)
     individual = own.individual or group - timedelta(days=course.individual_days_before_group)
+    individual_final = own.individual_final or individual + timedelta(hours=course.individual_grace_hours)
     final = own.final or lock or group + timedelta(hours=course.final_grace_hours)
     resolved = Deadlines(
-        individual=individual.astimezone(tz), group=group.astimezone(tz), final=final.astimezone(tz)
+        individual=individual.astimezone(tz),
+        individual_final=individual_final.astimezone(tz),
+        group=group.astimezone(tz),
+        final=final.astimezone(tz),
     )
     return hw.model_copy(update={"deadlines": resolved}), source

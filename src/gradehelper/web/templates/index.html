@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Homeworks</h1>
-<p class="muted">Run a stage, review the table, adjust, then warn students or upload to Canvas. Nothing leaves this machine until you confirm.</p>
+<p class="muted">Run a stage, review the table, adjust, then warn students, post feedback issues or upload to Canvas. Nothing leaves this machine until you confirm.</p>
 {% include "_job.html" %}
 <div class="grid">
 {% for item in homeworks %}
@@ -14,12 +14,13 @@
     <p class="muted" style="margin: 6px 0">
       {% set d = hw.deadlines %}
       Individual {{ d.individual.strftime("%m-%d %H:%M") if d.individual else "–" }} ·
+      +1 day {{ d.individual_final.strftime("%m-%d %H:%M") if d.individual_final else "–" }} ·
       group {{ d.group.strftime("%m-%d %H:%M") if d.group else "–" }} ·
       final {{ d.final.strftime("%m-%d %H:%M") if d.final else "–" }}<br>
       <span style="font-size: 12px">{{ item.source }}</span>
     </p>
     <div class="row">
-      {% for stage in ["individual", "group", "final"] %}
+      {% for stage in ["individual", "individual_final", "group", "final"] %}
         {% if stage in item.results %}
           <span class="chip ok">{{ stage }} · {{ item.results[stage].generated_at[:16].replace("T", " ") }} UTC</span>
         {% else %}

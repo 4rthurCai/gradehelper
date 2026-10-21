@@ -11,7 +11,7 @@
     </p>
   </div>
   <div class="tabs row">
-    {% for s, label in [("individual", "1 · Individual"), ("group", "2 · Group"), ("final", "3 · Group +1 day")] %}
+    {% for s, label in [("individual", "1 · Individual"), ("individual_final", "2 · Individual +1 day"), ("group", "3 · Group"), ("final", "4 · Group +1 day")] %}
     <a href="/hw/{{ g.hw.number }}?stage={{ s }}" class="{{ 'active' if stage == s }}">{{ label }}{% if s not in results %} <span class="muted">(not run)</span>{% endif %}</a>
     {% endfor %}
   </div>
@@ -27,14 +27,15 @@
   </form>
   <div class="row" style="margin-top: 10px">
     <a class="button" href="/hw/{{ g.hw.number }}/warnings?stage={{ stage }}">Preview Mattermost warnings…</a>
-    {% if stage != "individual" %}<a class="button" href="/hw/{{ g.hw.number }}/upload">Preview Canvas upload…</a>
-    <a class="button" href="/hw/{{ g.hw.number }}/late-issues">Late-team issues…</a>{% endif %}
-    <span class="muted">CSV: hws/{{ g.hw.name }}{{ "indv" if stage == "individual" }}.csv · overrides: hws/{{ g.hw.name }}.overrides.toml</span>
+    {% if stage in ("group", "final") %}<a class="button" href="/hw/{{ g.hw.number }}/feedback?stage={{ stage }}">Feedback issues…</a>{% endif %}
+    {% if stage == "final" %}<a class="button" href="/hw/{{ g.hw.number }}/upload">Preview Canvas upload…</a>{% endif %}
+    <span class="muted">CSV: hws/{{ g.hw.name }}{{ "indv" if stage in ("individual", "individual_final") }}.csv · overrides: hws/{{ g.hw.name }}.overrides.toml</span>
   </div>
   <p class="muted" style="margin: 8px 0 0">
-    {% if stage == "individual" %}At the individual deadline: grade, then warn on Mattermost.
-    {% elif stage == "group" %}At the group deadline: pre-grading, upload to Canvas; records teams without an on-time release.
-    {% else %}Group deadline + 1 day: full grading, <strong>do not upload yet</strong>. Push hws/{{ g.hw.name }}.csv to hw-scoreboard, open late-team issues, let TAs adjust the sheet, pull, then upload.{% endif %}
+    {% if stage == "individual" %}At the individual deadline: a reminder only, warn on Mattermost.
+    {% elif stage == "individual_final" %}Individual deadline + 1 day: the same checks again; this is the individual score. Fixes since the deadline get a TA note.
+    {% elif stage == "group" %}At the group deadline: open the feedback issue in each team repo. Not uploaded to Canvas; records teams without an on-time release.
+    {% else %}Group deadline + 1 day: full grading; reply in the feedback issues. Push hws/{{ g.hw.name }}.csv to hw-scoreboard, let TAs adjust the sheet, pull, then upload.{% endif %}
   </p>
   <div>
   </div>
@@ -53,7 +54,7 @@
 {% if team_overrides %}<div class="notice warn">{{ team_overrides | length }} team-wide override(s) in the TOML file also apply.</div>{% endif %}
 <div class="table-wrap">
 <table>
-  <thead><tr><th>Team</th><th>Name</th><th>ID</th><th>Score</th><th>Deductions</th>{% if stage != "individual" %}<th>Late</th>{% endif %}<th></th></tr></thead>
+  <thead><tr><th>Team</th><th>Name</th><th>ID</th><th>Score</th><th>Deductions</th><th>{{ "Notes" if stage in ("individual", "individual_final") else "Late" }}</th><th></th></tr></thead>
   <tbody>
   {% for r in rows %}
     {% set o = overrides.get(r.student.id) %}
@@ -71,7 +72,7 @@
         </details>
         {% endif %}
       </td>
-      {% if stage != "individual" %}<td>{% if r.meta.late %}<span class="chip warn">late</span>{% endif %}<div class="muted" style="font-size: 12px">{{ r.meta.release_time[:16].replace("T", " ") }}</div>{% for n in r.meta.notes %}<div class="chip warn" title="TA note">{{ n }}</div>{% endfor %}</td>{% endif %}
+      <td>{% if r.meta.late %}<span class="chip warn">late</span>{% endif %}<div class="muted" style="font-size: 12px">{{ r.meta.release_time[:16].replace("T", " ") }}</div>{% for n in r.meta.notes %}<div class="chip warn" title="TA note">{{ n }}</div>{% endfor %}</td>
       <td>
         <details><summary>adjust</summary>
           <form method="post" action="/hw/{{ g.hw.number }}/override" style="margin-top: 6px; min-width: 240px">

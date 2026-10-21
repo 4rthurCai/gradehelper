@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ g.hw.name }} feedback issues · Grade Helper{% endblock %}
+{% block content %}
+<p><a href="/hw/{{ g.hw.number }}?stage={{ stage }}">← {{ g.hw.name }}</a></p>
+<h1>Feedback issues · {{ stage }} run</h1>
+<div class="tabs row">
+  <a href="?stage=group" class="{{ 'active' if stage == 'group' }}">Open issues (group run)</a>
+  <a href="?stage=final" class="{{ 'active' if stage == 'final' }}">Reply (final run)</a>
+</div>
+<p class="muted">Posted by the bot (GITEA_BOT_ACCESS_TOKEN) in each team repo.
+  {% if stage == "group" %}One "{{ g.hw.name }} feedback" issue per team with the result at the group deadline, assigned to all collaborators. Teams that already have it are skipped.
+  {% else %}One reply in the "{{ g.hw.name }} feedback" issue with the result 24 hours later; late teams get only the late note. Issues already answered are skipped.{% endif %}</p>
+{% if plan is none %}
+  <div class="notice warn">No {{ stage }} result yet. Run the {{ stage }} stage first.</div>
+{% else %}
+{% set todo = plan | selectattr("todo") | list %}
+{% if result %}
+  <div class="notice {{ 'bad' if result[1] else 'ok' }}">Posted: {{ result[0] | join(", ") or "none" }}.</div>
+  {% for f in result[1] %}<div class="notice bad">{{ f }}</div>{% endfor %}
+{% elif todo %}
+  <form method="post" action="/hw/{{ g.hw.number }}/feedback" class="panel row" hx-confirm="Post {{ todo | length }} item(s) on Gitea as the bot?">
+    <input type="hidden" name="stage" value="{{ stage }}">
+    <input type="hidden" name="digest" value="{{ digest }}">
+    <strong>{{ todo | length }} {{ "issue(s) to open" if stage == "group" else "reply(ies) to post" }}</strong>
+    <button class="danger">Post on Gitea</button>
+  </form>
+{% elif not plan %}
+  <div class="notice ok">No teams in this run.</div>
+{% else %}
+  <div class="notice ok">Nothing to post.</div>
+{% endif %}
+{% if plan %}
+<div class="table-wrap" style="margin-top: 14px">
+<table>
+  <thead><tr><th>Team</th><th>Issue</th><th>Message</th><th></th></tr></thead>
+  <tbody>
+  {% for p in plan %}
+    <tr><td>{{ p.team.repo }}</td><td>{{ p.title }}{% if p.issue %} <span class="muted">#{{ p.issue }}</span>{% endif %}</td>
+      <td><details><summary>{{ p.body.splitlines()[0] if p.body else "" }}</summary><div class="message">{{ p.body }}</div></details></td>
+      <td>{% if p.action == "open" %}<span class="chip warn">to open</span>
+        {% elif p.action == "reply" %}<span class="chip warn">to reply</span>
+        {% elif p.action == "no issue" %}<span class="chip bad">no issue: open it first</span>
+        {% else %}<span class="chip">{{ p.action }}</span>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

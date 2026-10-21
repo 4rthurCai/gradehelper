@@ -12,10 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 STAGE_INDIVIDUAL = "individual"
+STAGE_INDIVIDUAL_FINAL = "individual_final"
 STAGE_GROUP = "group"
 STAGE_FINAL = "final"
 STAGES = (STAGE_INDIVIDUAL, STAGE_GROUP)  # rubric stages
-RUNS = (STAGE_INDIVIDUAL, STAGE_GROUP, STAGE_FINAL)  # the three runs per homework
+RUNS = (STAGE_INDIVIDUAL, STAGE_INDIVIDUAL_FINAL, STAGE_GROUP, STAGE_FINAL)  # the four runs per homework
+INDIVIDUAL_RUNS = (STAGE_INDIVIDUAL, STAGE_INDIVIDUAL_FINAL)
+GROUP_RUNS = (STAGE_GROUP, STAGE_FINAL)
 LANGUAGES = ("matlab", "c", "cc")
 
 
@@ -34,7 +37,7 @@ class Secrets(BaseSettings):
     gitea_domain_name: str = "focs.gc.sjtu.edu.cn"
     gitea_suffix: str = "/git"
     gitea_access_token: str = ""
-    gitea_bot_access_token: str = ""  # bot-engr151; used only to open late-submission issues
+    gitea_bot_access_token: str = ""  # bot-engr151; posts the feedback issues and replies
     gitea_org_name: str = ""
 
     git_host: str = "ssh://git@focs.gc.sjtu.edu.cn:2222"
@@ -119,16 +122,28 @@ class PrDescriptionSettings(BaseModel):
     unfilled_threshold: float = 0.6
 
 
-class LateIssueSettings(BaseModel):
+class FeedbackSettings(BaseModel):
+    """The per-team feedback issue: opened at the group deadline, answered 24 hours later."""
+
     title: str = "{hw} feedback"
-    body: str = (
-        "Late submission, no feedback provided.\n\nGetting this message doesn't mean feedback stage is over."
+    group_heading: str = "{hw}: auto-grader result at the group deadline"
+    final_heading: str = "{hw}: auto-grader result 24 hours after the group deadline"
+    group_no_problem: str = (
+        "No problem detected by the auto-grader, but TAs might detect more during the manual review. "
+        "Feel free to improve your submission if you wish."
     )
+    group_problems: str = (
+        "TAs might detect more during the manual review. Feel free to improve your submission if you wish."
+    )
+    final_no_problem: str = "No problem detected by the auto-grader."
+    final_problems: str = "If you want to provide more information regarding those issues, please reply in this thread."
+    late: str = "Late submission, no feedback provided.\n\nGetting this message doesn't mean feedback stage is over."
 
 
 class CourseConfig(BaseModel):
     score_floor: float = -2.5
     final_grace_hours: float = 24
+    individual_grace_hours: float = 24
     individual_days_before_group: float = 2
     timezone: str = "Asia/Shanghai"
     default_language: str = "matlab"
@@ -141,7 +156,7 @@ class CourseConfig(BaseModel):
     layout: LayoutSettings = LayoutSettings()
     review: ReviewSettings = ReviewSettings()
     pr_description: PrDescriptionSettings = PrDescriptionSettings()
-    late_issue: LateIssueSettings = LateIssueSettings()
+    feedback: FeedbackSettings = FeedbackSettings()
 
     def rubric_keys(self, stage: str) -> list[str]:
         return [key for key, item in self.rubric.items() if item.stage == stage]
@@ -149,12 +164,13 @@ class CourseConfig(BaseModel):
 
 class Deadlines(BaseModel):
     individual: datetime | None = None
+    individual_final: datetime | None = None  # defaults to individual + course individual_grace_hours
     group: datetime | None = None
     final: datetime | None = None  # defaults to group + course final_grace_hours
 
     model_config = ConfigDict(extra="forbid")  # catch typos and removed keys
 
-    @field_validator("individual", "group", "final")
+    @field_validator("individual", "individual_final", "group", "final")
     @classmethod
     def _timezone_aware(cls, value: datetime | None) -> datetime | None:
         if value is not None and value.tzinfo is None:
@@ -167,6 +183,11 @@ class Deadlines(BaseModel):
         if self.final is not None:
             return self.final
         return self.group + timedelta(hours=grace_hours) if self.group else None
+
+    def individual_final_cutoff(self, grace_hours: float) -> datetime | None:
+        if self.individual_final is not None:
+            return self.individual_final
+        return self.individual + timedelta(hours=grace_hours) if self.individual else None
 
 
 class HomeworkConfig(BaseModel):

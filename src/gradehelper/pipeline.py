@@ -1,14 +1,20 @@
-"""Grading stages. Reads remote systems; never writes to them (warnings/upload live elsewhere).
+"""Grading runs. Reads remote systems; never writes to them (warnings, feedback issues and
+uploads live elsewhere).
 
-individual stage (at the individual deadline): individual branches, individual PRs,
-    PR descriptions, JOJ scoreboard pinned at the deadline. Saved to hws/hN.indv.json.
-group stage (at the group deadline): hN tag contents, peer reviews, release status and
-    lateness. Pre-grading that is posted on Canvas. The individual part is reused as frozen
-    at the individual deadline and is NOT re-checked; if it does not exist yet it is
-    generated from PRs + JOJ only.
-final stage (group deadline + 1 day): the same group checks with the later cutoff, so late
-    releases are graded too; "late" still means no release by the group deadline. Not posted:
-    TAs review and adjust hN.csv in the hw-scoreboard repo, then `upload` posts that file.
+individual (at the individual deadline): individual branches, individual PRs, PR
+    descriptions, JOJ scoreboard pinned at the deadline. Only a reminder: Mattermost
+    warnings. Saved to hws/hN.indv.json.
+individual_final (individual deadline + 1 day): the same checks again, JOJ pinned at that
+    time. This is the individual score; students whose problems disappeared since the
+    individual run get a TA note. Saved to hws/hN.indv-final.json.
+group (at the group deadline): hN tag contents, peer reviews, release status and lateness.
+    Not posted on Canvas: it becomes the feedback issue opened in each team repo. The
+    individual part is reused as frozen and is NOT re-checked; if it does not exist yet it
+    is generated from PRs + JOJ only.
+final (group deadline + 1 day): the same group checks with the later cutoff, so late
+    releases are graded too; "late" still means no release by the group deadline. Answered
+    in the feedback issue; TAs review and adjust hN.csv in the hw-scoreboard repo, then
+    `upload` posts that file.
 """
 
 from __future__ import annotations
@@ -26,7 +32,16 @@ from .clients.canvas import CanvasClient
 from .clients.git import GitRepos
 from .clients.gitea import GiteaClient
 from .clients.mattermost import MattermostClient
-from .config import RUNS, STAGE_FINAL, STAGE_GROUP, STAGE_INDIVIDUAL, Deadlines, HomeworkConfig, Workspace
+from .config import (
+    RUNS,
+    STAGE_FINAL,
+    STAGE_GROUP,
+    STAGE_INDIVIDUAL,
+    STAGE_INDIVIDUAL_FINAL,
+    Deadlines,
+    HomeworkConfig,
+    Workspace,
+)
 from .deadlines import fetch_canvas_dates, resolve_deadlines
 from .models import Finding, Roster, StageResult, StudentMeta, Team, as_datetime
 from .overrides import load_overrides, overrides_path
@@ -61,6 +76,24 @@ def merge_results(previous: StageResult | None, new: StageResult) -> StageResult
         findings=tuple(f for f in previous.findings if f.student_id not in redone) + new.findings,
         meta={**{k: v for k, v in previous.meta.items() if k not in redone}, **new.meta},
     )
+
+
+def fixed_since(
+    earlier: StageResult, students: tuple[str, ...], findings: list[Finding], rubric_order: list[str]
+) -> dict[str, StudentMeta]:
+    """TA notes for students whose deductions from the earlier run are gone now."""
+    now: dict[str, set[str]] = {}
+    for f in findings:
+        now.setdefault(f.student_id, set()).add(f.key)
+    meta = {}
+    for sid in students:
+        if sid not in earlier.students:
+            continue
+        gone = {f.key for f in earlier.findings_for(sid)} - now.get(sid, set())
+        if gone:
+            keys = ", ".join(k for k in rubric_order if k in gone)  # findings only use rubric keys
+            meta[sid] = StudentMeta(notes=(f"fixed after the individual deadline: {keys}",))
+    return meta
 
 
 @dataclass
@@ -109,7 +142,7 @@ class Grader:
 
     @cached_property
     def bot_gitea(self) -> GiteaClient:
-        """The course bot account; late-submission issues are opened as the bot, not as a TA."""
+        """The course bot account: posts the feedback issues and replies (write:issue is enough)."""
         return GiteaClient(self.ws.secrets, "gitea_bot_access_token")
 
     @cached_property
@@ -168,21 +201,35 @@ class Grader:
         return joj.check_joj(board, self.roster.graded, self.hw, exercises, self.ws.course.joj, flag_missing)
 
     def run_individual(self, deadline: datetime | None = None, check_branches: bool = True) -> StageResult:
-        deadline = deadline or self.deadlines.individual
+        """At the individual deadline: a reminder (Mattermost warnings), not the score."""
+        return self._run_individual_checks(STAGE_INDIVIDUAL, deadline or self.deadlines.individual, check_branches)
+
+    def run_individual_final(self, deadline: datetime | None = None, check_branches: bool = True) -> StageResult:
+        """At individual deadline + 1 day: the individual score."""
+        cutoff = deadline or self.deadlines.individual_final_cutoff(self.ws.course.individual_grace_hours)
+        return self._run_individual_checks(STAGE_INDIVIDUAL_FINAL, cutoff, check_branches)
+
+    def _run_individual_checks(self, stage: str, deadline: datetime | None, check_branches: bool) -> StageResult:
         findings: list[Finding] = []
         if check_branches:
             ctx = RepoContext(self.ws.course, self.hw, self.git)
             findings += self._per_team("individual branches", lambda t: check_individual_branches(ctx, t))
         findings += self._per_team("individual PRs", self._pr_findings)
         findings += self._joj_findings(deadline, flag_missing=check_branches)
+        students = tuple(s.id for s in self.roster.graded)
+        meta = {}
+        if stage == STAGE_INDIVIDUAL_FINAL:
+            earlier = load_result(result_path(self.ws.output_dir, self.hw_number, STAGE_INDIVIDUAL))
+            meta = fixed_since(earlier, students, findings, list(self.ws.course.rubric)) if earlier else {}
         result = StageResult(
             hw=self.hw_number,
-            stage=STAGE_INDIVIDUAL,
+            stage=stage,
             generated_at=_now(),
             params={"joj_deadline": deadline.isoformat() if deadline else None,
                     "teams": self.teams, "branches_checked": check_branches},
-            students=tuple(s.id for s in self.roster.graded),
+            students=students,
             findings=tuple(findings),
+            meta=meta,
         )
         return self._save(result)
 
@@ -235,9 +282,12 @@ class Grader:
         return self._run_group_checks(STAGE_FINAL, cutoff)
 
     def _run_group_checks(self, stage: str, cutoff: datetime | None) -> StageResult:
-        if load_result(result_path(self.ws.output_dir, self.hw_number, STAGE_INDIVIDUAL)) is None:
+        base = self.individual_stage()
+        if base is None:
             self.progress("no individual result yet: generating it from PRs + JOJ only (branches not checked)")
-            self.run_individual(check_branches=False)
+            self.run_individual_final(check_branches=False)
+        elif base == STAGE_INDIVIDUAL:
+            self.progress("no individual +1 day result: the individual part uses the individual-deadline run")
 
         late_after = self.deadlines.group or cutoff
         ctx = RepoContext(self.ws.course, self.hw, self.git)
@@ -289,6 +339,23 @@ class Grader:
         results = self.results()
         return next((s for s in (STAGE_FINAL, STAGE_GROUP) if s in results), None)
 
+    def individual_stage(self) -> str | None:
+        """The run that holds the individual score: +1 day if it ran, else the deadline run."""
+        results = self.results()
+        return next((s for s in (STAGE_INDIVIDUAL_FINAL, STAGE_INDIVIDUAL) if s in results), None)
+
+    def latest_stage(self) -> str:
+        return self.latest_group_stage() or self.individual_stage() or STAGE_INDIVIDUAL
+
+    def upload_source(self):
+        """hN.csv, but only once the final run exists: the group run is never posted on Canvas."""
+        if STAGE_FINAL not in self.results():
+            raise ValueError(
+                f"{self.hw.name}.csv is uploaded only after the final run (group deadline + 1 day) "
+                f"and the TA review; run `gradehelper final {self.hw_number}` first"
+            )
+        return self.ws.output_dir / f"{self.hw.name}.csv"
+
     def rows(self, stage: str, stage_only: bool = False) -> list[Row]:
         """Rows for one run. group/final include the frozen individual part unless stage_only
         (used for warnings: only that run's own deductions)."""
@@ -297,21 +364,23 @@ class Grader:
             return []
         course = self.ws.course
         overrides = load_overrides(overrides_path(self.ws.output_dir, self.hw_number), set(course.rubric))
-        rubric_stage = STAGE_INDIVIDUAL if stage == STAGE_INDIVIDUAL else STAGE_GROUP
-        if stage == STAGE_INDIVIDUAL or stage_only:
-            keys = set(course.rubric_keys(rubric_stage))
+        individual = stage in (STAGE_INDIVIDUAL, STAGE_INDIVIDUAL_FINAL)
+        if individual or stage_only:
+            keys = set(course.rubric_keys(STAGE_INDIVIDUAL if individual else STAGE_GROUP))
             return build_rows(self.full_roster, course, [results[stage]], overrides, keys)
-        chain = [results[s] for s in (STAGE_INDIVIDUAL, stage) if s in results]
+        chain = [results[s] for s in (self.individual_stage(), stage) if s in results]
         return build_rows(self.full_roster, course, chain, overrides)
 
     def write_reports(self) -> list[str]:
-        """Write hNindv.csv and hN.csv (from the final run if present, else group).
+        """Write hNindv.csv (from the +1 day run if present) and hN.csv (from the final run if
+        present, else group).
 
         Returns problems instead of raising, e.g. a CSV kept because TAs edited it."""
         out = self.ws.output_dir
         jobs = []
-        if STAGE_INDIVIDUAL in self.results():
-            jobs.append((write_individual_csv, out / f"h{self.hw_number}indv.csv", STAGE_INDIVIDUAL))
+        individual = self.individual_stage()
+        if individual:
+            jobs.append((write_individual_csv, out / f"h{self.hw_number}indv.csv", individual))
         group_stage = self.latest_group_stage()
         if group_stage:
             jobs.append((write_final_csv, out / f"h{self.hw_number}.csv", group_stage))
@@ -325,7 +394,11 @@ class Grader:
 
 
 def suggest_stage(
-    hw: HomeworkConfig, ran: dict[str, datetime], grace_hours: float, now: datetime | None = None
+    hw: HomeworkConfig,
+    ran: dict[str, datetime],
+    grace_hours: float,
+    now: datetime | None = None,
+    individual_grace_hours: float = 24,
 ) -> tuple[str, str]:
     """Pick the run `gradehelper run` should execute, with a reason.
 
@@ -335,20 +408,25 @@ def suggest_stage(
     now = now or datetime.now(timezone.utc)
     d = hw.deadlines
     final_at = d.final_cutoff(grace_hours)
+    individual_at = d.individual_final_cutoff(individual_grace_hours)
 
     def done(stage: str, deadline: datetime | None) -> bool:
         at = ran.get(stage)
         return at is not None and (deadline is None or at >= deadline)
 
-    if d.individual is None or d.group is None or final_at is None:
+    if d.individual is None or d.group is None or final_at is None or individual_at is None:
         nxt = next((s for s in RUNS if s not in ran), STAGE_FINAL)
         return nxt, "deadlines not configured: first run not done yet"
     if now < d.individual:
         return STAGE_INDIVIDUAL, f"before the individual deadline ({d.individual}): preview"
     if not done(STAGE_INDIVIDUAL, d.individual):
-        return STAGE_INDIVIDUAL, f"individual deadline ({d.individual}) passed, not graded since"
+        return STAGE_INDIVIDUAL, f"individual deadline ({d.individual}) passed, not checked since: reminders"
+    if now < individual_at:
+        return STAGE_INDIVIDUAL_FINAL, f"before individual deadline + 1 day ({individual_at}): preview"
+    if not done(STAGE_INDIVIDUAL_FINAL, individual_at):
+        return STAGE_INDIVIDUAL_FINAL, f"individual deadline + 1 day ({individual_at}) passed: individual score"
     if now < d.group:
         return STAGE_GROUP, f"before the group deadline ({d.group}): preview"
     if now < final_at or not done(STAGE_GROUP, d.group):
-        return STAGE_GROUP, f"group deadline ({d.group}) passed: pre-grading for Canvas"
+        return STAGE_GROUP, f"group deadline ({d.group}) passed: feedback issues"
     return STAGE_FINAL, f"group deadline + grace ({final_at}) passed: full grading for TA review"

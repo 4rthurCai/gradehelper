@@ -8,8 +8,10 @@ workers = 8                 # teams checked in parallel
 roster_file = "hteams.csv"  # Name,ID,Email,Team  (refresh: gradehelper roster sync)
 output_dir = "hws"
 # Deadlines come from the Canvas assignment hN: group = due date, final = "available until"
-# (else group + final_grace_hours), individual = group - individual_days_before_group.
+# (else group + final_grace_hours), individual = group - individual_days_before_group,
+# individual_final = individual + individual_grace_hours (when the individual part is graded).
 final_grace_hours = 24
+individual_grace_hours = 24
 individual_days_before_group = 2
 timezone = "Asia/Shanghai"  # for display; comparisons are timezone-aware
 
@@ -125,7 +127,15 @@ perfunctory_phrases = [
 templates = ["individual_submission.md", "whole_submission.md"]  # under templates/
 unfilled_threshold = 0.6
 
-[late_issue]
-# Opened by `gradehelper late-issues hN` in repos of teams without an on-time release.
+[feedback]
+# One issue per team, posted by the bot (GITEA_BOT_ACCESS_TOKEN) with `gradehelper feedback hN`:
+# opened after the group run, answered in the same issue after the final run (group + 1 day).
+# Teams without a release by the group deadline get only `late` as the answer.
 title = "{hw} feedback"
-body = "Late submission, no feedback provided.\n\nGetting this message doesn't mean feedback stage is over."
+group_heading = "{hw}: auto-grader result at the group deadline"
+final_heading = "{hw}: auto-grader result 24 hours after the group deadline"
+group_no_problem = "No problem detected by the auto-grader, but TAs might detect more during the manual review. Feel free to improve your submission if you wish."
+group_problems = "TAs might detect more during the manual review. Feel free to improve your submission if you wish."
+final_no_problem = "No problem detected by the auto-grader."
+final_problems = "If you want to provide more information regarding those issues, please reply in this thread."
+late = "Late submission, no feedback provided.\n\nGetting this message doesn't mean feedback stage is over."

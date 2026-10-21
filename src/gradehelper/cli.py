@@ -15,9 +15,18 @@ from rich.logging import RichHandler
 from rich.markup import escape
 from rich.table import Table
 
-from .config import RUNS, STAGE_FINAL, STAGE_GROUP, STAGE_INDIVIDUAL, ConfigError, Workspace
+from .config import (
+    GROUP_RUNS,
+    RUNS,
+    STAGE_FINAL,
+    STAGE_GROUP,
+    STAGE_INDIVIDUAL,
+    STAGE_INDIVIDUAL_FINAL,
+    ConfigError,
+    Workspace,
+)
+from .feedback import EXISTS, NO_ISSUE, OPEN, REPLIED, REPLY, plan_feedback, post_feedback
 from .grading import fmt_points
-from .late_issues import late_teams, open_late_issues, plan_late_issues
 from .notify import build_warnings, send_warnings
 from .pipeline import Grader, suggest_stage
 from .report import HandEditedError, Row, read_final_csv
@@ -29,7 +38,8 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
     context_settings=HELP,
-    help="ENGR1510J grade helper. Per homework: individual (i) -> group (g) -> final (f) -> upload.",
+    help="ENGR1510J grade helper. Per homework: individual (i) -> individual-final -> group (g) -> feedback "
+    "-> final (f) -> feedback -> upload.",
 )
 roster_app = typer.Typer(no_args_is_help=True, context_settings=HELP, help="Student roster (hteams.csv)")
 app.add_typer(roster_app, name="roster")
@@ -80,10 +90,12 @@ def _grader(hw: str, teams: str = "", overwrite: bool = False) -> Grader:
 
 
 NEXT_STEP = {
-    STAGE_INDIVIDUAL: "next: `gradehelper warn {n}` if not sent yet; group run at the group deadline",
-    STAGE_GROUP: "next: `gradehelper upload {n}` (pre-grading on Canvas)",
-    STAGE_FINAL: "next: push hws/{hw}.csv to hw-scoreboard for TA review; `gradehelper late-issues {n}`; "
-    "after the review, pull and `gradehelper upload {n}`. Not uploaded now.",
+    STAGE_INDIVIDUAL: "next: `gradehelper warn {n}` (Mattermost reminders) if not sent yet; "
+    "the individual score comes from `gradehelper individual-final {n}` one day later",
+    STAGE_INDIVIDUAL_FINAL: "next: group run at the group deadline",
+    STAGE_GROUP: "next: `gradehelper feedback {n}` opens the feedback issue in each team repo. Not uploaded to Canvas.",
+    STAGE_FINAL: "next: `gradehelper feedback {n}` replies in the feedback issues; push hws/{hw}.csv to "
+    "hw-scoreboard for TA review; after the review, pull and `gradehelper upload {n}`.",
 }
 
 
@@ -127,13 +139,14 @@ def _warn(grader: Grader, stage: str, yes: bool) -> None:
 def _run_stage(grader: Grader, stage: str, deadline: datetime | None, warn: bool, yes: bool) -> None:
     runner = {
         STAGE_INDIVIDUAL: grader.run_individual,
+        STAGE_INDIVIDUAL_FINAL: grader.run_individual_final,
         STAGE_GROUP: grader.run_group,
         STAGE_FINAL: grader.run_final,
     }[stage]
     runner(deadline)
     _print_rows(grader.rows(stage), f"{grader.hw.name} {stage}", only_issues=True)
     out = grader.ws.output_dir
-    report = out / (f"{grader.hw.name}indv.csv" if stage == STAGE_INDIVIDUAL else f"{grader.hw.name}.csv")
+    report = out / (f"{grader.hw.name}.csv" if stage in GROUP_RUNS else f"{grader.hw.name}indv.csv")
     console.print(f"report: {report}")
     console.print(f"[bold]{NEXT_STEP[stage].format(n=grader.hw_number, hw=grader.hw.name)}[/bold]")
     if warn:
@@ -157,9 +170,11 @@ def _guard(fn):
 @app.command()
 @_guard
 def run(hw: Hw, teams: Teams = "", warn: Warn = False, yes: Yes = False, overwrite: Overwrite = False) -> None:
-    """One click: pick individual / group / final from the configured deadlines and run it."""
+    """One click: pick individual / individual-final / group / final from the deadlines and run it."""
     grader = _grader(hw, teams, overwrite)
-    stage, reason = suggest_stage(grader.scheduled, grader.run_times(), grader.ws.course.final_grace_hours)
+    course = grader.ws.course
+    stage, reason = suggest_stage(grader.scheduled, grader.run_times(), course.final_grace_hours,
+                                  individual_grace_hours=course.individual_grace_hours)
     console.print(f"[dim]deadlines from {escape(grader.deadline_source)}[/dim]")
     console.print(f"[bold]{grader.hw.name}: {stage} stage[/bold] ({escape(reason)})")
     if not yes and not typer.confirm("continue?", default=True):
@@ -173,8 +188,18 @@ def individual(
     hw: Hw, teams: Teams = "", deadline: Deadline = None, warn: Warn = False, yes: Yes = False,
     overwrite: Overwrite = False,
 ) -> None:
-    """1. Individual deadline: branches, individual PRs, PR descriptions, JOJ. Aliases: indv, i."""
+    """1. Individual deadline: branches, individual PRs, PR descriptions, JOJ; reminders only. Aliases: indv, i."""
     _run_stage(_grader(hw, teams, overwrite), STAGE_INDIVIDUAL, _deadline(deadline), warn, yes)
+
+
+@app.command("individual-final")
+@_guard
+def individual_final(
+    hw: Hw, teams: Teams = "", deadline: Deadline = None, warn: Warn = False, yes: Yes = False,
+    overwrite: Overwrite = False,
+) -> None:
+    """2. Individual deadline + 1 day: the same checks again; this is the individual score. Alias: indv-final."""
+    _run_stage(_grader(hw, teams, overwrite), STAGE_INDIVIDUAL_FINAL, _deadline(deadline), warn, yes)
 
 
 @app.command()
@@ -183,7 +208,7 @@ def group(
     hw: Hw, teams: Teams = "", deadline: Deadline = None, warn: Warn = False, yes: Yes = False,
     overwrite: Overwrite = False,
 ) -> None:
-    """2. Group deadline: tag, reviews, release, lateness; pre-grading for Canvas. Alias: g."""
+    """3. Group deadline: tag, reviews, release, lateness; then `feedback` opens the issues. Alias: g."""
     _run_stage(_grader(hw, teams, overwrite), STAGE_GROUP, _deadline(deadline), warn, yes)
 
 
@@ -193,37 +218,58 @@ def final(
     hw: Hw, teams: Teams = "", deadline: Deadline = None, warn: Warn = False, yes: Yes = False,
     overwrite: Overwrite = False,
 ) -> None:
-    """3. Group deadline + 1 day: full grading for TA review, not uploaded. Alias: f."""
+    """4. Group deadline + 1 day: full grading for TA review; then `feedback` replies. Alias: f."""
     _run_stage(_grader(hw, teams, overwrite), STAGE_FINAL, _deadline(deadline), warn, yes)
 
 
-@app.command("late-issues")
+FEEDBACK_STATE = {
+    OPEN: "[yellow]will open[/yellow]",
+    EXISTS: "[dim]issue #{issue} exists, skipped[/dim]",
+    REPLY: "[yellow]will reply in #{issue}[/yellow]",
+    REPLIED: "[dim]already answered in #{issue}, skipped[/dim]",
+    NO_ISSUE: "[red]no {title!r} issue; open it first with --stage group[/red]",
+}
+
+
+@app.command()
 @_guard
-def late_issues(hw: Hw, yes: Yes = False) -> None:
-    """Open the 'Late submission, no feedback provided.' issue for teams without an on-time release."""
-    grader = _grader(hw)
-    results = grader.results()
-    source = next((results[s] for s in (STAGE_GROUP, STAGE_FINAL) if s in results), None)
-    if source is None:
+def feedback(
+    hw: Hw,
+    stage: Annotated[Optional[str], typer.Option(help="group (open the issues) or final (reply in them); "
+                                                 "default: the latest of the two runs")] = None,
+    teams: Teams = "",
+    yes: Yes = False,
+) -> None:
+    """Feedback issue in each team repo: opened after the group run, answered after the final run (as the bot)."""
+    grader = _grader(hw, teams)
+    stage = stage or grader.latest_group_stage()
+    if stage is None:
         raise ValueError(f"run `gradehelper group {grader.hw_number}` first")
-    teams = late_teams(grader.full_roster, source)
-    if not teams:
-        console.print(f"[green]no late teams (from the {source.stage} run)[/green]")
-        return
+    if stage not in GROUP_RUNS:
+        raise typer.BadParameter(f"--stage must be one of {GROUP_RUNS}")
+    if stage not in grader.results():
+        raise ValueError(f"no {stage} result yet; run `gradehelper {stage} {grader.hw_number}` first")
     bot = grader.bot_gitea  # checked before the preview: a missing GITEA_BOT_ACCESS_TOKEN stops here
-    plan = plan_late_issues(grader.gitea, teams, grader.hw.name, grader.ws.course.late_issue)
+    plan = plan_feedback(grader.gitea, stage, grader.rows(stage, stage_only=True), grader.roster.teams,
+                         grader.hw.name, grader.ws.course.feedback)
     for item in plan:
-        state = "[dim]already open, skipped[/dim]" if item.exists else "[yellow]will open[/yellow]"
-        console.print(f"{item.team.repo}: {escape(repr(item.title))} — {state}")
-    todo = [p for p in plan if not p.exists]
+        state = FEEDBACK_STATE[item.action].format(issue=item.issue, title=item.title)
+        console.print(f"{item.team.repo}: {state}")
+    todo = [p for p in plan if p.todo]
     if not todo:
+        console.print("[green]nothing to post[/green]")
         return
-    console.print(f"body: {escape(repr(todo[0].body))}; assigned to all collaborators")
-    if not yes and not typer.confirm(f"open {len(todo)} issue(s) on Gitea?"):
-        console.print("not opened")
+    for item in todo[:3]:
+        console.rule(escape(f"{item.team.repo}: {item.title}"))
+        console.print(item.body, markup=False, highlight=False)  # exactly what is posted
+    console.rule()
+    what = f"open {len(todo)} issue(s)" if stage == STAGE_GROUP else f"post {len(todo)} reply(ies)"
+    console.print(f"first {min(3, len(todo))} shown above; issues are assigned to all collaborators")
+    if not yes and not typer.confirm(f"{what} on Gitea as the bot?"):
+        console.print("not posted")
         return
-    opened, failures = open_late_issues(bot, plan)
-    console.print(f"[green]opened {', '.join(opened) or 'none'}[/green]")
+    posted, failures = post_feedback(bot, plan)
+    console.print(f"[green]posted {', '.join(posted) or 'none'}[/green]")
     for f in failures:
         console.print(f"  [red]{escape(f)}[/red]")
 
@@ -232,7 +278,7 @@ def late_issues(hw: Hw, yes: Yes = False) -> None:
 @_guard
 def warn(
     hw: Hw,
-    stage: Annotated[str, typer.Option(help="individual, group or final")] = STAGE_INDIVIDUAL,
+    stage: Annotated[str, typer.Option(help="individual, individual_final, group or final")] = STAGE_INDIVIDUAL,
     yes: Yes = False,
 ) -> None:
     """Preview and send Mattermost warnings from the saved results."""
@@ -246,7 +292,7 @@ def warn(
 def show(hw: Hw, all_rows: Annotated[bool, typer.Option("--all")] = False, overwrite: Overwrite = False) -> None:
     """Show the latest saved results and refresh the CSVs (overrides applied)."""
     grader = _grader(hw, overwrite=overwrite)
-    stage = grader.latest_group_stage() or STAGE_INDIVIDUAL
+    stage = grader.latest_stage()
     for problem in grader.write_reports():
         console.print(f"[yellow]{escape(problem)}[/yellow]")
     _print_rows(grader.rows(stage), f"{grader.hw.name} {stage}", only_issues=not all_rows)
@@ -259,9 +305,9 @@ def upload(
     yes: Yes = False,
     force: Annotated[bool, typer.Option(help="re-post grades that were already uploaded unchanged")] = False,
 ) -> None:
-    """Upload hws/hN.csv to Canvas (the CSV is the source of truth, hand edits included)."""
+    """Upload hws/hN.csv to Canvas after the final run and the TA review (hand edits included)."""
     grader = _grader(hw)
-    csv_path = grader.ws.output_dir / f"{grader.hw.name}.csv"
+    csv_path = grader.upload_source()
     rows = read_final_csv(csv_path)
     canvas = grader.canvas()
     assignment = canvas.find_assignment(grader.hw_number, grader.hw.canvas_assignment_id)
@@ -336,6 +382,7 @@ def doctor() -> None:
             h, dl = g.hw, g.deadlines
             report(True, f"h{n}: {h.language}, {len(h.mandatory)} mandatory files; deadlines from "
                          f"{g.deadline_source}: individual {dl.individual:%m-%d %H:%M}, "
+                         f"individual +1 day {dl.individual_final:%m-%d %H:%M}, "
                          f"group {dl.group:%m-%d %H:%M}, final {dl.final:%m-%d %H:%M}")
         except ConfigError as e:
             report(False, str(e))
@@ -343,7 +390,7 @@ def doctor() -> None:
     for group_name, fields in {
         "Canvas": ("canvas_access_token", "canvas_course_id"),
         "Gitea": ("gitea_access_token", "gitea_org_name"),
-        "Gitea bot (late issues)": ("gitea_bot_access_token",),
+        "Gitea bot (feedback issues)": ("gitea_bot_access_token",),
         "Mattermost": ("mattermost_access_token", "mattermost_team"),
     }.items():
         missing = s.missing(*fields)
@@ -397,5 +444,7 @@ def roster_show() -> None:
 
 
 # Short aliases (hidden from the command list; mentioned in each command's help).
-for _alias, _command in (("indv", individual), ("i", individual), ("g", group), ("f", final)):
+for _alias, _command in (
+    ("indv", individual), ("i", individual), ("indv-final", individual_final), ("g", group), ("f", final),
+):
     app.command(_alias, hidden=True)(_command)

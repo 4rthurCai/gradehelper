@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from gradehelper import cli
-from gradehelper.config import STAGE_GROUP, STAGE_INDIVIDUAL
+from gradehelper.config import STAGE_FINAL, STAGE_GROUP, STAGE_INDIVIDUAL
 from gradehelper.models import Finding, StageResult, StudentMeta
 from gradehelper.notify import build_warnings, send_warnings
 from gradehelper.pipeline import Grader
@@ -18,7 +18,7 @@ from gradehelper.roster import load_roster, roster_from_canvas, save_roster
 from gradehelper.upload import apply_upload, ledger_path, plan_upload
 from gradehelper.web.app import create_app
 
-from .conftest import ALICE, BOB, CAROL, DAVE, LONER, ns
+from .conftest import ALICE, BOB, CAROL, DAVE, LONER, FakeIssues, ns
 
 
 def seed_results(ws) -> None:
@@ -235,96 +235,94 @@ def test_web_send_warnings_checks_preview_count(web, monkeypatch):
     assert ok.status_code == 200 and len(mm.sent) == 2
 
 
-# ---------- late issues ----------
+# ---------- feedback issues ----------
 
-class FakeIssueGitea:
-    def __init__(self, existing):
-        self.existing, self.created = existing, []
-
-    def issue_titles(self, repo):
-        return self.existing.get(repo, set())
-
-    def collaborators(self, repo):
-        return ["bot", "member"]
-
-    def create_issue(self, repo, title, body, assignees):
-        self.created.append((repo, title, body, tuple(assignees)))
-        return 7
+def seed_run(ws, stage: str, late=()) -> None:
+    """hteam-02 (Carol, Dave) late if listed; Bob missed the review."""
+    meta = {s.id: StudentMeta(s.id in late) for s in (ALICE, BOB, CAROL, DAVE)}
+    save_result(result_path(ws.output_dir, 1, stage), StageResult(
+        1, stage, "t", students=tuple(meta), findings=(Finding(BOB.id, "noReview"),), meta=meta,
+    ))
 
 
-def test_late_issues_only_for_late_teams_and_skip_existing(workspace):
-    from gradehelper.config import LateIssueSettings
-    from gradehelper.late_issues import late_teams, open_late_issues, plan_late_issues
-    from gradehelper.models import Roster
-
-    roster = Roster((ALICE, BOB, CAROL, DAVE))
-    result = StageResult(1, STAGE_GROUP, "t", students=(ALICE.id, BOB.id, CAROL.id, DAVE.id),
-                         meta={ALICE.id: StudentMeta(False), BOB.id: StudentMeta(False),
-                               CAROL.id: StudentMeta(True), DAVE.id: StudentMeta(True)})
-    teams = late_teams(roster, result)
-    assert [t.key for t in teams] == ["hteam-02"]
-
-    gitea = FakeIssueGitea({})
-    plan = plan_late_issues(gitea, teams, "h1", LateIssueSettings())
-    opened, failures = open_late_issues(gitea, plan)
-    assert opened == ["hteam02#7"] and failures == []
-    assert gitea.created == [("hteam02", "h1 feedback", LateIssueSettings().body, ("bot", "member"))]
-
-    again = FakeIssueGitea({"hteam02": {"h1 feedback"}})
-    assert open_late_issues(again, plan_late_issues(again, teams, "h1", LateIssueSettings())) == ([], [])
-    assert again.created == []
-
-
-def seed_late_team(ws) -> None:
-    """hteam-02 (Carol, Dave) had no release by the group deadline."""
-    late = {s.id: StudentMeta(s in (CAROL, DAVE)) for s in (ALICE, BOB, CAROL, DAVE)}
-    save_result(result_path(ws.output_dir, 1, STAGE_GROUP),
-                StageResult(1, STAGE_GROUP, "t", students=tuple(late), meta=late))
-
-
-def test_late_issues_are_opened_with_the_bot_token(workspace, monkeypatch):
+def token_gitea(monkeypatch, workspace, issues=None):
+    """Every GiteaClient the CLI builds, keyed by token. Like the real one, the bot token has
+    only write:issue: it can read and write issues but cannot list collaborators."""
     from gradehelper import pipeline
 
-    seed_late_team(workspace)
     (workspace.root / ".env").write_text(
         "GITEA_ORG_NAME=org\nGITEA_ACCESS_TOKEN=ta\nGITEA_BOT_ACCESS_TOKEN=bot\n", encoding="utf-8"
     )
     clients = {}
 
-    class TokenGitea(FakeIssueGitea):
+    class TokenGitea(FakeIssues):
         def __init__(self, secrets, token_field="gitea_access_token"):
-            super().__init__({})
+            super().__init__(issues)
             self.token = getattr(secrets, token_field)
             clients[self.token] = self
 
         def collaborators(self, repo):
-            if self.token == "bot":  # the bot token only has write:issue, like the real one
+            if self.token == "bot":
                 raise PermissionError("required=[read:repository], token scope=write:issue")
             return super().collaborators(repo)
 
     monkeypatch.setattr(pipeline, "GiteaClient", TokenGitea)
     monkeypatch.chdir(workspace.root)
-    result = CliRunner().invoke(cli.app, ["late-issues", "1", "--yes"])
+    return clients
+
+
+def test_feedback_issues_are_opened_by_the_bot_after_the_group_run(workspace, monkeypatch):
+    seed_run(workspace, STAGE_GROUP, late=(CAROL.id, DAVE.id))
+    clients = token_gitea(monkeypatch, workspace)
+    result = CliRunner().invoke(cli.app, ["feedback", "1", "--yes"])
     assert result.exit_code == 0, result.output
-    assert clients["bot"].created == [("hteam02", "h1 feedback", workspace.course.late_issue.body, ("bot", "member"))]
-    assert clients["ta"].created == []
+    opened = clients["bot"].opened
+    assert [(repo, title, assignees) for repo, title, _, assignees in opened] == [
+        ("hteam01", "h1 feedback", ("bot", "member")), ("hteam02", "h1 feedback", ("bot", "member")),
+    ]
+    assert "| missing others' code review | John Doe | -1 |" in opened[0][2]
+    assert clients["ta"].opened == [] and clients["ta"].replied == []
 
 
-def test_late_issues_refuse_to_run_without_the_bot_token(workspace, monkeypatch):
-    seed_late_team(workspace)
+def test_feedback_after_the_final_run_replies_in_the_issues(workspace, monkeypatch):
+    seed_run(workspace, STAGE_GROUP, late=(CAROL.id, DAVE.id))
+    seed_run(workspace, STAGE_FINAL, late=(CAROL.id, DAVE.id))
+    issues = {"hteam01": [ns(number=3, title="h1 feedback")], "hteam02": [ns(number=4, title="h1 feedback")]}
+    clients = token_gitea(monkeypatch, workspace, issues)
+    result = CliRunner().invoke(cli.app, ["feedback", "1", "--yes"])  # defaults to the latest run: final
+    assert result.exit_code == 0, result.output
+    replies = {repo: (number, body) for repo, number, body in clients["bot"].replied}
+    assert replies["hteam02"] == (4, workspace.course.feedback.late)
+    assert replies["hteam01"][0] == 3 and workspace.course.feedback.final_problems in replies["hteam01"][1]
+    assert clients["bot"].opened == []
+
+
+def test_feedback_refuses_to_run_without_the_bot_token(workspace, monkeypatch):
+    seed_run(workspace, STAGE_GROUP)
     monkeypatch.delenv("GITEA_BOT_ACCESS_TOKEN", raising=False)
     monkeypatch.chdir(workspace.root)
-    result = CliRunner().invoke(cli.app, ["late-issues", "1", "--yes"])
+    result = CliRunner().invoke(cli.app, ["feedback", "1", "--yes"])
     assert result.exit_code != 0
     assert "GITEA_BOT_ACCESS_TOKEN" in result.output and "Traceback" not in result.output
 
 
-def test_web_shows_three_runs_and_late_issue_page(web):
+def test_upload_needs_the_final_run(workspace, monkeypatch):
+    seed_results(workspace)  # individual + group only
+    monkeypatch.chdir(workspace.root)
+    result = CliRunner().invoke(cli.app, ["upload", "1", "--yes"])
+    assert result.exit_code != 0 and "only after the final run" in result.output
+
+
+def test_web_shows_four_runs_and_feedback_page(web, monkeypatch):
     client, _ = web
     page = client.get("/hw/1").text
-    assert "1 · Individual" in page and "3 · Group +1 day" in page
-    assert "do not upload yet" in client.get("/hw/1?stage=final").text
-    assert "No late teams." in client.get("/hw/1/late-issues").text
+    assert "2 · Individual +1 day" in page and "4 · Group +1 day" in page
+    assert "Not uploaded to Canvas" in client.get("/hw/1?stage=group").text
+    assert "No final result yet" in client.get("/hw/1/feedback?stage=final").text
+    monkeypatch.setattr(Grader, "gitea", property(lambda self: FakeIssues()))
+    feedback = client.get("/hw/1/feedback?stage=group").text
+    assert "2 issue(s) to open" in feedback and "auto-grader result at the group deadline" in feedback
+    assert "only after the final run" in client.get("/hw/1/upload").text
 
 
 def test_web_reports_hand_edited_csv(web, workspace):

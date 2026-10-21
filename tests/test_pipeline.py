@@ -12,7 +12,14 @@ from pathlib import Path
 import pytest
 from git import Actor, Repo
 
-from gradehelper.config import STAGE_FINAL, STAGE_GROUP, STAGE_INDIVIDUAL, Deadlines, HomeworkConfig
+from gradehelper.config import (
+    STAGE_FINAL,
+    STAGE_GROUP,
+    STAGE_INDIVIDUAL,
+    STAGE_INDIVIDUAL_FINAL,
+    Deadlines,
+    HomeworkConfig,
+)
 from gradehelper.models import Finding, StageResult
 from gradehelper.overrides import Override, overrides_path, save_overrides
 from gradehelper.pipeline import Grader, merge_results, suggest_stage
@@ -212,11 +219,31 @@ def test_group_stage_reuses_frozen_individual_result(grader: Grader):
     assert rows[CAROL.id]["Score"] == "-2.5" and rows[CAROL.id]["Late"] == "Yes"
 
 
+def test_individual_final_run_is_the_individual_score_and_notes_fixes(grader: Grader):
+    grader.run_individual()
+    assert "indvFailSubmit" in deduction_keys(grader, STAGE_INDIVIDUAL)[CAROL.id]  # not on the board yet
+
+    grader.run_individual_final()
+    result = grader.results()[STAGE_INDIVIDUAL_FINAL]
+    assert result.params["joj_deadline"] == (IND_DEADLINE + timedelta(hours=24)).isoformat()
+    assert "indvFailSubmit" not in deduction_keys(grader, STAGE_INDIVIDUAL_FINAL)[CAROL.id]
+    sheet = read_csv(grader.ws.output_dir / "h1indv.csv")  # now written from the +1 day run
+    assert sheet[CAROL.id]["Individual_Score"] == "0"
+    assert sheet[CAROL.id]["TA Notes"] == "fixed after the individual deadline: indvFailSubmit"
+    assert sheet[ALICE.id]["TA Notes"] == ""
+
+    grader.run_group()
+    assert "indvFailSubmit" not in deduction_keys(grader, STAGE_GROUP)[CAROL.id]
+    final = read_csv(grader.ws.output_dir / "h1.csv")[CAROL.id]
+    assert final["Late"] == "Yes"  # group lateness and the individual note are both kept
+    assert final["TA Notes"] == "fixed after the individual deadline: indvFailSubmit"
+
+
 def test_group_stage_generates_missing_individual_part_without_branch_checks(grader: Grader):
     grader.run_group()
-    individual = grader.results()[STAGE_INDIVIDUAL]
+    individual = grader.results()[STAGE_INDIVIDUAL_FINAL]
     assert individual.params["branches_checked"] is False
-    keys = deduction_keys(grader, STAGE_INDIVIDUAL)
+    keys = deduction_keys(grader, STAGE_INDIVIDUAL_FINAL)
     assert "indvUntidy" not in keys[BOB.id]
     assert "indvFailSubmit" not in keys[CAROL.id]  # missing from scoreboard is not flagged here
 
@@ -251,19 +278,27 @@ def test_merge_results_replaces_only_rerun_students():
     assert merged.findings == (Finding("b", "noReview"),)
 
 
-def test_suggest_stage_follows_the_three_runs():
+def test_suggest_stage_follows_the_four_runs():
     hw = HomeworkConfig(number=1, language="matlab", pass_threshold=50,
                         deadlines=Deadlines(individual=IND_DEADLINE, group=GROUP_DEADLINE))
     hour = timedelta(hours=1)
     ind = {STAGE_INDIVIDUAL: IND_DEADLINE + hour}
-    grp = {**ind, STAGE_GROUP: GROUP_DEADLINE + hour}
-    assert suggest_stage(hw, {}, 24, IND_DEADLINE - hour)[0] == STAGE_INDIVIDUAL
-    assert suggest_stage(hw, {}, 24, IND_DEADLINE + hour)[0] == STAGE_INDIVIDUAL
-    assert suggest_stage(hw, ind, 24, IND_DEADLINE + 2 * hour)[0] == STAGE_GROUP  # preview
-    assert suggest_stage(hw, ind, 24, GROUP_DEADLINE + hour)[0] == STAGE_GROUP
-    assert suggest_stage(hw, grp, 24, GROUP_DEADLINE + 23 * hour)[0] == STAGE_GROUP
-    assert suggest_stage(hw, grp, 24, GROUP_DEADLINE + 25 * hour)[0] == STAGE_FINAL
-    assert suggest_stage(hw, ind, 24, GROUP_DEADLINE + 25 * hour)[0] == STAGE_GROUP  # group run missing
+    ind2 = {**ind, STAGE_INDIVIDUAL_FINAL: IND_DEADLINE + 25 * hour}
+    grp = {**ind2, STAGE_GROUP: GROUP_DEADLINE + hour}
+
+    def stage(ran, now):
+        return suggest_stage(hw, ran, 24, now)[0]
+
+    assert stage({}, IND_DEADLINE - hour) == STAGE_INDIVIDUAL
+    assert stage({}, IND_DEADLINE + hour) == STAGE_INDIVIDUAL
+    assert stage(ind, IND_DEADLINE + 2 * hour) == STAGE_INDIVIDUAL_FINAL  # preview
+    assert stage(ind, IND_DEADLINE + 25 * hour) == STAGE_INDIVIDUAL_FINAL
+    assert stage(ind2, IND_DEADLINE + 26 * hour) == STAGE_GROUP  # preview
+    assert stage(ind2, GROUP_DEADLINE + hour) == STAGE_GROUP
+    assert stage(grp, GROUP_DEADLINE + 23 * hour) == STAGE_GROUP
+    assert stage(grp, GROUP_DEADLINE + 25 * hour) == STAGE_FINAL
+    assert stage(ind2, GROUP_DEADLINE + 25 * hour) == STAGE_GROUP  # group run missing
+    assert stage(ind, GROUP_DEADLINE + 25 * hour) == STAGE_INDIVIDUAL_FINAL  # individual +1 day missing
 
 
 def test_suggest_stage_does_not_count_previews_as_done():
@@ -272,15 +307,18 @@ def test_suggest_stage_does_not_count_previews_as_done():
     hour = timedelta(hours=1)
     preview_ind = {STAGE_INDIVIDUAL: IND_DEADLINE - 5 * hour}
     stage, reason = suggest_stage(hw, preview_ind, 24, IND_DEADLINE + hour)
-    assert stage == STAGE_INDIVIDUAL and "not graded since" in reason
-    preview_grp = {STAGE_INDIVIDUAL: IND_DEADLINE + hour, STAGE_GROUP: GROUP_DEADLINE - 5 * hour}
+    assert stage == STAGE_INDIVIDUAL and "not checked since" in reason
+    preview_ind2 = {STAGE_INDIVIDUAL: IND_DEADLINE + hour, STAGE_INDIVIDUAL_FINAL: IND_DEADLINE + 2 * hour}
+    assert suggest_stage(hw, preview_ind2, 24, IND_DEADLINE + 30 * hour)[0] == STAGE_INDIVIDUAL_FINAL
+    preview_grp = {**preview_ind2, STAGE_INDIVIDUAL_FINAL: IND_DEADLINE + 25 * hour,
+                   STAGE_GROUP: GROUP_DEADLINE - 5 * hour}
     assert suggest_stage(hw, preview_grp, 24, GROUP_DEADLINE + 30 * hour)[0] == STAGE_GROUP
 
 
 def test_suggest_stage_without_deadlines_picks_first_missing_run():
     hw = HomeworkConfig(number=1, language="matlab", pass_threshold=50)
     assert suggest_stage(hw, {}, 24)[0] == STAGE_INDIVIDUAL
-    assert suggest_stage(hw, {STAGE_INDIVIDUAL: IND_DEADLINE}, 24)[0] == STAGE_GROUP
+    assert suggest_stage(hw, {STAGE_INDIVIDUAL: IND_DEADLINE}, 24)[0] == STAGE_INDIVIDUAL_FINAL
 
 
 def test_final_run_grades_late_release_but_keeps_it_late(grader: Grader, tmp_path):

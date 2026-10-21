@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-ENGR1510J 作业自动评分工具。它检查 Gitea 上的 team 仓库、Pull Request、同伴 review 和 JOJ scoreboard，为每份作业生成 CSV 成绩表，在 Mattermost 上提醒学生，并把成绩上传到 Canvas。
+ENGR1510J 作业自动评分工具。它检查 Gitea 上的 team 仓库、Pull Request、同伴 review 和 JOJ scoreboard，为每份作业生成 CSV 成绩表，在 Mattermost 上提醒学生，在每个 team 仓库里开反馈 issue，并把成绩上传到 Canvas。
 
 不再依赖 Joint-Teapot。
 
@@ -17,7 +17,7 @@ gradehelper roster sync              # 从 Canvas 的 hteam 分组生成 hteams.
 gradehelper doctor                   # 检查配置、凭据、ctags 和花名册
 ```
 
-- Gitea 默认用你自己的 `GITEA_ACCESS_TOKEN`。只有 `late-issues` 用 `GITEA_BOT_ACCESS_TOKEN`（bot-engr151 的 token），以 bot 身份开 issue；没填就不会运行。
+- 读 Gitea 用你自己的 `GITEA_ACCESS_TOKEN`。反馈 issue 和回复以 bot 身份发出，用 `GITEA_BOT_ACCESS_TOKEN`（bot-engr151 的 token，只需要 `write:issue` 权限）；没填的话 `feedback` 不会运行。
 - 服务器默认是 `focs.gc.sjtu.edu.cn`。git 走 SSH（`GIT_HOST`，默认 `ssh://git@focs.gc.sjtu.edu.cn:2222`）。
 - 仓库缓存在 `repos/`。遇到防火墙断开连接会自动重试。
 
@@ -25,7 +25,7 @@ gradehelper doctor                   # 检查配置、凭据、ctags 和花名�
 
 ### 课程级：`config/course.toml`
 
-包含 rubric（分值、描述、属于哪一轮）、每份作业的封底分（-2.5）、整洁检查的白名单、review 的敷衍判定规则、JOJ 阈值，以及迟交 issue 的标题和正文。一般一学期只需要改一次。
+包含 rubric（分值、描述、属于哪一轮）、每份作业的封底分（-2.5）、整洁检查的白名单、review 的敷衍判定规则、JOJ 阈值，以及反馈 issue 的标题和各段文字（`[feedback]`）。一般一学期只需要改一次。
 
 ### 每份作业：`config/homeworks/hN.toml`
 
@@ -43,11 +43,12 @@ optional = ["ex1.h"]
 | deadline | 来源 |
 | --- | --- |
 | 小组 deadline | Canvas 作业的截止时间（due） |
-| 第 3 轮截止时间 | Canvas 作业的「可用截止」时间（available until / lock）；没有设置时用小组 deadline + 24h |
+| 第 4 轮截止时间 | Canvas 作业的「可用截止」时间（available until / lock）；没有设置时用小组 deadline + 24h |
 | 个人 deadline | 小组 deadline 往前推 2 天（`course.toml` 的 `individual_days_before_group`） |
+| 第 2 轮截止时间 | 个人 deadline + 24h（`course.toml` 的 `individual_grace_hours`） |
 
-- 每次运行都会显示 deadline 的来源，`gradehelper doctor` 会列出所有作业的三个时间。
-- 需要覆盖时，在 `[deadlines]` 里写 `individual`、`group` 或 `final`（必须带时区，例如 `"2026-10-02T23:59:00+08:00"`）。只要写了 `group`，就完全不会访问 Canvas。
+- 每次运行都会显示 deadline 的来源，`gradehelper doctor` 会列出所有作业的四个时间。
+- 需要覆盖时，在 `[deadlines]` 里写 `individual`、`individual_final`、`group` 或 `final`（必须带时区，例如 `"2026-10-02T23:59:00+08:00"`）。只要写了 `group`，就完全不会访问 Canvas。
 - 如果 Canvas 上有多个作业名都以 `hN` 开头，在 `hN.toml` 里写 `canvas_assignment_id` 指定是哪一个。
 
 **JOJ 每题满分不用填。** 工具会从 engr151-joj 仓库 `master` 分支的 JOJ3 配置里自动读取：
@@ -57,50 +58,67 @@ optional = ["ex1.h"]
 
 同一道题的多个 stage（`ex1`、`ex1-asan`、`[run] ex1-valgrind` 等）会合并计算。每次运行都会打印用到的满分，方便核对。如果确实需要手动指定，可以在 `hN.toml` 里写 `[joj.exercises]` 或 `[joj.release]` 覆盖。
 
-## 每份作业跑三轮
+## 每份作业跑四轮
 
 | 时间 | 命令 | 做什么 | 之后 |
 | --- | --- | --- | --- |
-| 个人 deadline | `gradehelper individual 3 --warn`（简写 `indv` / `i`） | 检查个人分支、个人 PR、PR 描述、个人 JOJ（scoreboard 固定在 deadline 时刻）→ `hws/h3indv.csv`；在 Mattermost 提醒有问题的学生 | – |
-| 小组 deadline | `gradehelper group 3`（简写 `g`） | 检查 `h3` tag 内容和 code quality、同伴 review、release 编译状态、小组 JOJ；记录没有按时 release 的 team → `hws/h3.csv` | `gradehelper upload 3`（预评分上传 Canvas） |
-| 小组 deadline + 1 天 | `gradehelper final 3`（简写 `f`） | 用更晚的截止时间把小组检查完整再跑一遍，24h 内的迟交也会被评分；Late 仍然按小组 deadline 判定 → `hws/h3.csv`。**不上传** | 见下面「第 3 轮之后」 |
+| 第 1 轮：个人 deadline | `gradehelper individual 3 --warn`（简写 `indv` / `i`） | 检查个人分支、个人 PR、PR 描述、个人 JOJ（scoreboard 固定在 deadline 时刻）。**只用来提醒**：在 Mattermost 提醒有问题的学生 | – |
+| 第 2 轮：个人 deadline + 1 天 | `gradehelper individual-final 3`（简写 `indv-final`） | 同样的检查再跑一遍，JOJ 取这个时刻的 scoreboard → `hws/h3indv.csv`。**这是个人部分的分数**；deadline 之后才改好的学生，会在 `TA Notes` 列里标出来 | – |
+| 第 3 轮：小组 deadline | `gradehelper group 3`（简写 `g`） | 检查 `h3` tag 内容和 code quality、同伴 review、release 编译状态、小组 JOJ；记录没有按时 release 的 team → `hws/h3.csv`。**不上传 Canvas** | `gradehelper feedback 3`：在每个 team 仓库开「h3 feedback」issue |
+| 第 4 轮：小组 deadline + 1 天 | `gradehelper final 3`（简写 `f`） | 用更晚的截止时间把小组检查完整再跑一遍，24h 内的迟交也会被评分；Late 仍然按小组 deadline 判定 → `hws/h3.csv` | 见下面「第 4 轮之后」 |
 
-- `gradehelper run 3`：根据 `h3.toml` 里的 deadline 自动判断该跑哪一轮，询问确认后执行。判断规则：
+- `gradehelper run 3`：根据 deadline 自动判断该跑哪一轮，询问确认后执行。判断规则：
 
   | 现在的时间 | 跑哪一轮 |
   | --- | --- |
   | 个人 deadline 之前 | individual（预览） |
   | 个人 deadline 之后，但还没有在 deadline 之后跑过 individual | individual |
+  | 第 2 轮截止时间之前 | individual-final（预览） |
+  | 第 2 轮截止时间之后，但还没有在这之后跑过 individual-final | individual-final |
   | 小组 deadline 之前 | group（预览） |
-  | 小组 deadline 到第 3 轮截止时间之间，或者还没有在小组 deadline 之后跑过 group | group |
-  | 第 3 轮截止时间之后 | final |
+  | 小组 deadline 到第 4 轮截止时间之间，或者还没有在小组 deadline 之后跑过 group | group |
+  | 第 4 轮截止时间之后 | final |
 
-  deadline 之前跑的只算预览，不会让 `run` 跳过正式的那一轮。没有填 deadline 时，按 individual → group → final 的顺序选第一个还没跑过的。
+  deadline 之前跑的只算预览，不会让 `run` 跳过正式的那一轮。没有填 deadline 时，按 individual → individual-final → group → final 的顺序选第一个还没跑过的。
 - `gradehelper ui`：打开本地网页，完成上面所有操作（默认 http://127.0.0.1:8151）。
 
-**第 3 轮之后：**
+**第 3 轮之后：** 运行 `gradehelper feedback 3`，以 bot 身份在每个 team 仓库开「h3 feedback」issue（见下面「反馈 issue」）。小组 deadline 的结果不再上传 Canvas。
 
-1. 把 `hws/h3.csv` push 到 hw-scoreboard 仓库。
-2. 运行 `gradehelper late-issues 3`，以 bot-engr151 的身份给迟交的 team 开「Late submission, no feedback provided.」issue。
-3. TA 审阅并修改表格。
+**第 4 轮之后：**
+
+1. 运行 `gradehelper feedback 3`，在同一个 issue 里回复 +24h 的结果。
+2. 把 `hws/h3.csv` push 到 hw-scoreboard 仓库。
+3. TA 在 issue 里写最终反馈（迟交的 team 只告诉他们找谁申诉），并修改表格。
 4. pull 回最新的表格。
 5. 运行 `gradehelper upload 3`。
+
+### 反馈 issue
+
+`gradehelper feedback 3` 默认处理最近的一次小组轮（可以用 `--stage group|final` 指定），先预览，确认后以 bot 身份发出：
+
+- 第 3 轮之后：在每个 team 仓库开「h3 feedback」issue，指派给所有 collaborator。内容是小组 deadline 时的结果：扣分表（问题、谁：整个 team 或具体学生、分值）、细节，最后一句是 "TAs might detect more during the manual review. Feel free to improve your submission if you wish."。没有扣分的 team 只写一句 "No problem detected by the auto-grader, but TAs might detect more during the manual review. Feel free to improve your submission if you wish."。
+- 第 4 轮之后：在这个 issue 里回复 +24h 的结果，有问题时最后一句是 "If you want to provide more information regarding those issues, please reply in this thread."，没有问题时是 "No problem detected by the auto-grader."。小组 deadline 时没有 release 的 team（Late）只回复 "Late submission, no feedback provided. ..."，不列结果。
+
+- issue 里只列这一轮自己的扣分（小组项），个人部分的问题走 Mattermost。
+- 不会重复发：已经有「h3 feedback」的 team 不会再开新 issue，已经回复过的 issue 会跳过，所以 `feedback` 可以放心重跑。
+- 所有文字都在 `config/course.toml` 的 `[feedback]` 里。
 
 ### 指定重跑某一轮
 
 `run` 只是帮你自动选择轮次。要指定跑哪一轮，直接用对应的命令就行：随时可以跑，也可以重复跑，不受 deadline 限制。
 
 ```bash
-gradehelper individual 3          # 重跑第 1 轮（个人）
-gradehelper group 3               # 重跑第 2 轮（小组 deadline）
-gradehelper final 3               # 重跑第 3 轮（+1 天）
+gradehelper individual 3          # 重跑第 1 轮（个人 deadline）
+gradehelper individual-final 3    # 重跑第 2 轮（个人 deadline + 1 天）
+gradehelper group 3               # 重跑第 3 轮（小组 deadline）
+gradehelper final 3               # 重跑第 4 轮（小组 deadline + 1 天）
 gradehelper group 3 -t 5          # 只重跑 hteam-05，其他 team 已保存的结果保留
 gradehelper group 3 -t 5,12 -d 2026-10-02T23:59:59+08:00   # 用指定的截止时间重跑
 ```
 
 - 重跑会覆盖这一轮已保存的结果（加了 `-t` 时只覆盖这几个 team），然后重新生成 CSV。如果 CSV 已经被 TA 改过，工具会保留它不覆盖，需要时加 `--overwrite`。
-- 重跑 individual 会重新检查分支和 PR 的**当前**状态。个人 deadline 之后再重跑，可能会把 deadline 之后才补的提交也算进去。
-- 重跑只会读取 Canvas、Gitea 和 git，不会发提醒，也不会上传。
+- 重跑 individual 或 individual-final 会重新检查分支和 PR 的**当前**状态。在第 2 轮截止时间之后再重跑，可能会把之后才补的提交也算进去。
+- 重跑只会读取 Canvas、Gitea 和 git，不会发提醒、不会发 issue，也不会上传。
 
 测试时建议：
 
@@ -112,10 +130,10 @@ gradehelper group 3 -t 5,12 -d 2026-10-02T23:59:59+08:00   # 用指定的截止�
 
 | 命令 | 作用 |
 | --- | --- |
-| `gradehelper warn 3 --stage group` | 根据已保存的结果预览并发送 Mattermost 提醒（`--stage` 可选 individual / group / final） |
+| `gradehelper warn 3 --stage group` | 根据已保存的结果预览并发送 Mattermost 提醒（`--stage` 可选 individual / individual_final / group / final） |
+| `gradehelper feedback 3 [--stage group\|final]` | 开反馈 issue（第 3 轮之后）或在其中回复（第 4 轮之后） |
 | `gradehelper show 3 [--all]` | 在终端里显示结果表（默认只显示有扣分的人），并刷新 CSV |
-| `gradehelper upload 3 [--force]` | 上传 `hws/h3.csv` 到 Canvas |
-| `gradehelper late-issues 3` | 给迟交的 team 开 issue |
+| `gradehelper upload 3 [--force]` | 上传 `hws/h3.csv` 到 Canvas（第 4 轮之后才允许） |
 | `gradehelper roster show` | 查看花名册 |
 | `gradehelper doctor` | 运行前自检 |
 
@@ -132,27 +150,27 @@ gradehelper group 3 -t 5,12 -d 2026-10-02T23:59:59+08:00   # 用指定的截止�
 
 ## 规则细节
 
-### 个人部分在第 1 轮冻结
+### 个人部分在第 2 轮冻结
 
-个人部分在个人 deadline 时评分，结果保存在 `hws/hN.indv.json`。第 2、3 轮直接沿用，不会重新检查分支和 JOJ，所以 deadline 之后再 push 也不会改变个人部分的扣分。
+第 1 轮（个人 deadline，`hws/hN.indv.json`）只用来在 Mattermost 上提醒。个人部分在第 2 轮（个人 deadline + 24h）评分，结果保存在 `hws/hN.indv-final.json`，第 3、4 轮直接沿用，不会重新检查分支和 JOJ，所以之后再 push 也不会改变个人部分的扣分。
 
-- 分支、文件、PR、PR 描述：看第 1 轮**实际运行那一刻**的状态，所以第 1 轮应该在 deadline 刚过时跑。
-- 个人 JOJ：读 scoreboard 在 deadline 那一刻的版本，和什么时候运行无关。
-- 如果跑第 2 轮时还没有个人结果，会自动补一份（只检查 PR 和 JOJ，不检查分支），终端里会明确提示。
-- 个人迟交（deadline 后 24h 内补交并开了道歉 issue）：工具不会自动处理，需要 TA 用 override 手动撤销扣分。
+- 24h 内改好的问题不扣分。和第 1 轮相比扣分消失了的学生，会在 `TA Notes` 列里写明改了什么（例如 `fixed after the individual deadline: noIndividualPR`），学生看不到。
+- 分支、文件、PR、PR 描述：看这一轮**实际运行那一刻**的状态，所以应该在截止时间刚过时跑。
+- 个人 JOJ：读 scoreboard 在这一轮截止时间那一刻的版本，和什么时候运行无关。
+- 如果跑第 3 轮时还没有第 2 轮的结果，会退回用第 1 轮的结果，并在终端里提示；连第 1 轮也没有时，会自动补一份（只检查 PR 和 JOJ，不检查分支）。
 
 ### release 的时间判定
 
-以个人 deadline 9/30、小组 deadline 10/2 23:59 为例，第 3 轮截止时间是 10/3 23:59。
+以个人 deadline 9/30、小组 deadline 10/2 23:59 为例，第 4 轮截止时间是 10/3 23:59。
 
 只有同时满足以下条件，才算「提交」：tag 恰好是 `hN`，是已发布的 release（draft 不算），并且创建时间不晚于这一轮的截止时间。结果与这一轮实际在什么时候运行无关。
 
-| release 创建时间 | 第 2 轮（截止 10/2 23:59，会上传） | 第 3 轮（截止 10/3 23:59） | Late |
+| release 创建时间 | 第 3 轮（截止 10/2 23:59，写进反馈 issue） | 第 4 轮（截止 10/3 23:59） | Late |
 | --- | --- | --- | --- |
 | 10/2 23:59 前 | 正常评分 | 正常评分 | No |
-| 10/2 23:59 至 10/3 23:59 | 视为未提交，-2.5（起提醒作用） | 正常评分，迟交本身不扣分 | Yes，开迟交 issue |
-| 10/3 23:59 之后 | -2.5 | 拒收，-2.5 | Yes，开迟交 issue |
-| 没有 tag、只有 draft、或只有 tag 没有 release | -2.5 | -2.5 | Yes，开迟交 issue |
+| 10/2 23:59 至 10/3 23:59 | 视为未提交，-2.5（写在 issue 里，起提醒作用） | 正常评分，迟交本身不扣分 | Yes，issue 里只回复迟交说明 |
+| 10/3 23:59 之后 | -2.5 | 拒收，-2.5 | Yes，issue 里只回复迟交说明 |
+| 没有 tag、只有 draft、或只有 tag 没有 release | -2.5 | -2.5 | Yes，issue 里只回复迟交说明 |
 
 - 被视为未提交的 team 只扣一次 `groupFailSubmit`，detail 里写明原因。它们的 tag 内容、编译和小组 JOJ 都不再检查。同伴 review 照常按这一轮的截止时间检查。
 - 如果 `hN` tag 指向的 commit 没有对应的 JOJ release 运行（可能是 release 之后挪过 tag），会在 CSV 的 `TA Notes` 列里提示。这只是给 TA 的提示，不扣分，学生也看不到。
@@ -163,7 +181,7 @@ gradehelper group 3 -t 5,12 -d 2026-10-02T23:59:59+08:00   # 用指定的截止�
 
 - 发在队友的个人 PR 上（PR 标题包含 `hN` 和对方的 12 位学号），不是自己的 PR。普通评论、review、行内代码评论都算。
 - 作者是花名册上的学生（学号从 Gitea 的 full name 或 login 中提取）。
-- 发表时间不晚于这一轮的截止时间。所以在第 3 轮，小组 deadline 之后 24h 内补的 review 也算。
+- 发表时间不晚于这一轮的截止时间。所以在第 4 轮，小组 deadline 之后 24h 内补的 review 也算。
 - 不是敷衍内容：至少 15 个字符，去掉 "lgtm"、"thanks" 这类套话之后，有效内容至少占一半。
 
 只要在任意一个队友的 PR 上留过一条有效 review，就不扣分。被判为敷衍的内容会记录在日志里。
@@ -187,15 +205,16 @@ gradehelper group 3 -t 5,12 -d 2026-10-02T23:59:59+08:00   # 用指定的截止�
 
 两项都扣全组成员。
 
-### 成绩表是第 3 轮之后的唯一依据
+### 成绩表是第 4 轮之后的唯一依据
 
+- 小组 deadline 的结果不上传 Canvas：第 4 轮跑完之前，`upload` 会拒绝执行。
 - TA 直接修改 hw-scoreboard 里的 `hws/hN.csv`。`upload` 上传的就是这个文件的内容，包括手改的部分。git 的 pull 和 push 由你自己操作。
 - 工具会记录自己上一次写出的内容（`hws/.gradehelper-written.json`）。如果 CSV 之后被人改过，或者是从别处 pull 来的，工具**拒绝覆盖**并给出提示。只有确定要重新生成时才加 `--overwrite`，这样做会丢掉手改的内容。
 - hw-scoreboard 的 `.gitignore` 只放行 CSV，所以工具的其他文件（`*.json`、`*.toml`）不会被提交，只保存在本机。
 
 ### 手动调整（override）
 
-在第 3 轮把表格交给 TA 之前，可以在网页上点某一行的「adjust」，或者直接编辑 `hws/hN.overrides.toml`。重新运行时会自动套用，并以 Note 的形式写进学生看到的 comment：
+在第 4 轮把表格交给 TA 之前，可以在网页上点某一行的「adjust」，或者直接编辑 `hws/hN.overrides.toml`。重新运行时会自动套用，并以 Note 的形式写进学生看到的 comment：
 
 ```toml
 [[override]]
@@ -206,12 +225,12 @@ remove = ["noReview"]          # 撤销某些扣分
 note = "review left on Mattermost, checked by TA"
 ```
 
-第 3 轮之后以 TA 修改过的 CSV 为准，override 主要用于这之前的调整。
+第 4 轮之后以 TA 修改过的 CSV 为准，override 主要用于这之前的调整。override 的 note 也会出现在反馈 issue 里。
 
 ### 安全
 
 - 评分本身只读取 Canvas、Gitea 和 git，不写入任何东西。
-- 发 Mattermost 提醒、开迟交 issue、上传 Canvas 之前，都会先预览，确认后才执行（命令行加 `--yes` 可以跳过确认）。
+- 发 Mattermost 提醒、发反馈 issue、上传 Canvas 之前，都会先预览，确认后才执行（命令行加 `--yes` 可以跳过确认）。
 - 上传记录保存在 `hws/hN.uploaded.json`。分数和 comment 都没变的不会重复上传，所以重复执行 upload 不会在 Canvas 上堆积重复的 comment。
 - 网页只监听 127.0.0.1，并且要求每次启动时生成的随机 token，其他网站无法借你的浏览器发起操作。
 
@@ -223,7 +242,7 @@ note = "review left on Mattermost, checked by TA"
 | `indvUntidy` | -0.25 | 个人 | 个人分支里有多余文件 |
 | `noIndividualPR` | -0.5 | 个人 | 没有标题包含 `hN` 和本人学号的 PR |
 | `notWritingPR` | -0.25 | 个人 | PR 描述（取写得最好的一个）仍然像没填的模板 |
-| `jojFailHomework` | -0.5 | 个人 | deadline 时刻的 scoreboard：总分没到 pass_threshold，且各题平均得分率 < 25% |
+| `jojFailHomework` | -0.5 | 个人 | 个人 deadline + 24h 时刻的 scoreboard：总分没到 pass_threshold，且各题平均得分率 < 25% |
 | `jojFailExercise` | -0.25 ×（最多 2 次） | 个人 | 同上，某题得分率 < 10% |
 | `groupFailSubmit` | -2.5 | 小组 | 截止时间前没有提交（见上文的时间判定）；或 tag 里缺 `hN/` 目录、mandatory 文件或 README |
 | `groupUntidy` | -0.25 | 小组 | tag 里有多余文件 |
@@ -248,7 +267,7 @@ engr151-joj 的 `master` 分支上找不到这份作业的 `conf-release.json`�
 运行 `brew install universal-ctags`。C/C++ 作业的 code quality 检查需要它。
 
 **`[deadlines]` 报错 `Extra inputs are not permitted`**
-`[deadlines]` 只接受 `individual`、`group`、`final` 三个字段。旧版的 `review` 已经取消：第 3 轮的 review 截止时间就是 +24h。
+`[deadlines]` 只接受 `individual`、`individual_final`、`group`、`final` 四个字段。旧版的 `review` 已经取消：第 4 轮的 review 截止时间就是 +24h。
 
 **有人退课或换组（开学前几周常见）**
 重新运行 `gradehelper roster sync`。它会从 Canvas 重新拉取学生和 hteam 分组，按类别列出变化：退课、不再在任何 team、换 team、加入 team、新加入课程。确认后才覆盖 `hteams.csv`。不在任何 team 的学生会保留在文件里，但不参与评分。
@@ -269,8 +288,8 @@ src/gradehelper/
   grading.py         rubric → 分数和 comment（唯一计算分数的地方）
   report.py          每轮的结果（JSON）和 CSV
   overrides.py       手动调整
-  late_issues.py     迟交 team 的 issue
-  pipeline.py        三轮评分流程
+  feedback.py        每个 team 仓库里的反馈 issue
+  pipeline.py        四轮评分流程
   notify.py          Mattermost 提醒
   upload.py          Canvas 上传
   cli.py, web/       命令行和本地网页
