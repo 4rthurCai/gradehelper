@@ -371,6 +371,11 @@ class Grader:
         chain = [results[s] for s in (self.individual_stage(), stage) if s in results]
         return build_rows(self.full_roster, course, chain, overrides)
 
+    def feedback_rows(self, stage: str) -> list[Row]:
+        """What the feedback issue shows: the group run's own deductions; the final reply
+        also has the individual part, since it gives each student's homework score."""
+        return self.rows(stage, stage_only=stage == STAGE_GROUP)
+
     def write_reports(self) -> list[str]:
         """Write hNindv.csv (from the +1 day run if present) and hN.csv (from the final run if
         present, else group).

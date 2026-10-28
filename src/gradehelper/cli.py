@@ -250,7 +250,7 @@ def feedback(
     if stage not in grader.results():
         raise ValueError(f"no {stage} result yet; run `gradehelper {stage} {grader.hw_number}` first")
     bot = grader.bot_gitea  # checked before the preview: a missing GITEA_BOT_ACCESS_TOKEN stops here
-    plan = plan_feedback(grader.gitea, stage, grader.rows(stage, stage_only=True), grader.roster.teams,
+    plan = plan_feedback(grader.gitea, stage, grader.feedback_rows(stage), grader.roster.teams,
                          grader.hw.name, grader.ws.course.feedback)
     for item in plan:
         state = FEEDBACK_STATE[item.action].format(issue=item.issue, title=item.title)

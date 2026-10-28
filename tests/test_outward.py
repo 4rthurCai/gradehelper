@@ -292,7 +292,9 @@ def test_feedback_after_the_final_run_replies_in_the_issues(workspace, monkeypat
     result = CliRunner().invoke(cli.app, ["feedback", "1", "--yes"])  # defaults to the latest run: final
     assert result.exit_code == 0, result.output
     replies = {repo: (number, body) for repo, number, body in clients["bot"].replied}
-    assert replies["hteam02"] == (4, workspace.course.feedback.late)
+    late_number, late_body = replies["hteam02"]
+    assert late_number == 4 and late_body.rstrip().endswith(workspace.course.feedback.late.rstrip())
+    assert "\n| Li Si | 0 |\n" in late_body  # scores for late teams too
     assert replies["hteam01"][0] == 3 and workspace.course.feedback.final_problems in replies["hteam01"][1]
     assert clients["bot"].opened == []
 

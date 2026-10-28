@@ -1,8 +1,10 @@
 """The per-team feedback issue in each team repo.
 
-After the group run: open "hN feedback" with the auto-grader result at the group deadline.
-After the final run: reply in the same issue with the result 24 hours later; teams without a
-release by the group deadline get only the late note. TAs then answer in the issue by hand.
+After the group run: open "hN feedback" with the auto-grader result at the group deadline
+(group deductions only, no score).
+After the final run: reply in the same issue with the result 24 hours later, individual
+deductions included, and every student's homework score; teams without a release by the
+group deadline get the late note at the end. TAs then answer in the issue by hand.
 
 All reads (existing issues and replies, collaborators) use the reader client (the TA's
 token); the writer client (the course bot) only creates issues and comments, so write:issue
@@ -60,20 +62,40 @@ def _problem_table(rows: list[Row]) -> list[str]:
     return lines
 
 
+def _details(rows: list[Row]) -> list[str]:
+    """Details in order; ones that not every member has say whose they are."""
+    whose: dict[str, list[str]] = {}
+    for row in rows:
+        for d in row.grade.details:
+            whose.setdefault(d, []).append(row.student.display_name)
+    return [d if len(names) == len(rows) else f"{d} ({', '.join(names)})" for d, names in whose.items()]
+
+
+def _score_table(rows: list[Row], settings: FeedbackSettings) -> list[str]:
+    lines = [settings.final_scores, "", "| Student | Score |", "| --- | --- |"]
+    return lines + [f"| {r.student.display_name} | {fmt_points(r.grade.score)} |" for r in rows]
+
+
 def render_message(stage: str, rows: list[Row], hw: str, settings: FeedbackSettings) -> str:
-    """The issue body (group run) or the reply (final run) for one team's rows."""
-    if stage == STAGE_FINAL and any(r.meta.late for r in rows):
-        return settings.late
+    """The issue body (group run: that run's deductions) or the reply (final run: full rows,
+    individual part included) for one team's rows."""
+    final = stage == STAGE_FINAL
     parts = [_heading(stage, hw, settings), ""]
-    if not any(r.grade.deductions for r in rows):
-        parts.append(settings.group_no_problem if stage == STAGE_GROUP else settings.final_no_problem)
-        return "\n".join(parts) + "\n"
-    parts += _problem_table(rows)
-    details = list(dict.fromkeys(d for r in rows for d in r.grade.details))
-    notes = list(dict.fromkeys(f"Note ({r.student.display_name}): {n}" for r in rows for n in r.grade.notes))
-    if details or notes:
-        parts += ["", "Details:", *(f"- {d}" for d in details), *(f"- {n}" for n in notes)]
-    parts += ["", settings.group_problems if stage == STAGE_GROUP else settings.final_problems]
+    problems = any(r.grade.deductions for r in rows)
+    if problems:
+        parts += _problem_table(rows)
+        details = _details(rows)
+        notes = list(dict.fromkeys(f"Note ({r.student.display_name}): {n}" for r in rows for n in r.grade.notes))
+        if details or notes:
+            parts += ["", "Details:", *(f"- {d}" for d in details), *(f"- {n}" for n in notes)]
+    else:
+        parts.append(settings.final_no_problem if final else settings.group_no_problem)
+    if final:
+        parts += ["", *_score_table(rows, settings)]
+    if problems:
+        parts += ["", settings.final_problems if final else settings.group_problems]
+    if final and any(r.meta.late for r in rows):
+        parts += ["", settings.late]
     return "\n".join(parts) + "\n"
 
 
@@ -85,7 +107,7 @@ def _is_our_reply(body: str, hw: str, settings: FeedbackSettings) -> bool:
 def plan_feedback(
     reader: GiteaClient, stage: str, rows: list[Row], teams: tuple[Team, ...], hw: str, settings: FeedbackSettings
 ) -> list[FeedbackItem]:
-    """What `post_feedback` would do per team. rows: that run's own deductions (stage_only)."""
+    """What `post_feedback` would do per team. rows: `Grader.feedback_rows(stage)`."""
     if stage not in (STAGE_GROUP, STAGE_FINAL):
         raise ValueError(f"feedback is posted after the group or final run, not {stage}")
     title = settings.title.format(hw=hw)

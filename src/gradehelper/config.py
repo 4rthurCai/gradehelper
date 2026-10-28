@@ -137,6 +137,7 @@ class FeedbackSettings(BaseModel):
     )
     final_no_problem: str = "No problem detected by the auto-grader."
     final_problems: str = "If you want to provide more information regarding those issues, please reply in this thread."
+    final_scores: str = "Homework score of each student:"
     late: str = "Late submission, no feedback provided.\n\nGetting this message doesn't mean feedback stage is over."
 
 

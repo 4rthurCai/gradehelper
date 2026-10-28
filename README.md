@@ -94,15 +94,17 @@ bot, after a preview:
   auto-grader result at the group deadline: a table of deductions (problem, who: "whole team" or
   the student, points), the details, and "TAs might detect more during the manual review. Feel
   free to improve your submission if you wish." With no deduction it says so in one sentence.
-- after `final`: replies in that issue with the result 24 hours later, ending with "If you want
-  to provide more information regarding those issues, please reply in this thread." (or "No
-  problem detected by the auto-grader."). Teams without a release by the group deadline get
-  only "Late submission, no feedback provided. ...".
+- after `final`: replies in that issue with the result 24 hours later. The table also has
+  the individual deductions (frozen at individual deadline + 1 day; appeals can cover them), then
+  each student's homework score, ending with "If you want to provide more information regarding
+  those issues, please reply in this thread." (or "No problem detected by the auto-grader.").
+  Teams without a release by the group deadline get the same reply with "Late submission, no
+  feedback provided. ..." at the end.
 
 TAs then answer in the same issue by hand (final feedback; for late teams, who to appeal to).
 Nothing is posted twice: an existing `h3 feedback` issue is not reopened and an issue that
-already has the reply is skipped, so `feedback` can be rerun safely. Only the deductions of
-that run's own stage are listed (the individual part is on Mattermost). All texts are in
+already has the reply is skipped, so `feedback` can be rerun safely. The group issue lists
+only group deductions and no score (the individual part is on Mattermost). All texts are in
 `[feedback]` of `config/course.toml`.
 
 Common options: `-t/--teams "1,5"` (only these teams; other teams' saved results are kept),
@@ -117,9 +119,9 @@ not depend on when a run is executed.
 | Release created | Group run (cutoff 10/2 23:59, feedback issue) | Final run (cutoff 10/3 23:59) | Late |
 | --- | --- | --- | --- |
 | by 10/2 23:59 | graded | graded | No |
-| 10/2 23:59 – 10/3 23:59 | not submitted, -2.5 (in the issue) | graded; no deduction for lateness | Yes, reply is the late note |
-| after 10/3 23:59 | -2.5 | rejected, -2.5 | Yes, reply is the late note |
-| none / draft only / tag only | -2.5 | -2.5 | Yes, reply is the late note |
+| 10/2 23:59 – 10/3 23:59 | not submitted, -2.5 (in the issue) | graded; no deduction for lateness | Yes, late note at the end of the reply |
+| after 10/3 23:59 | -2.5 | rejected, -2.5 | Yes, late note at the end of the reply |
+| none / draft only / tag only | -2.5 | -2.5 | Yes, late note at the end of the reply |
 
 Teams that are not submitted get a single `groupFailSubmit` with the reason; their tag
 contents, compile status and group JOJ are not graded. Peer reviews always are (cutoff of the

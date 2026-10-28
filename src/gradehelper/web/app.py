@@ -191,7 +191,7 @@ def create_app(ws: Workspace) -> FastAPI:
             raise HTTPException(404)
         if stage not in g.results():
             return g, None, ""
-        plan = plan_feedback(g.gitea, stage, g.rows(stage, stage_only=True), g.roster.teams, g.hw.name,
+        plan = plan_feedback(g.gitea, stage, g.feedback_rows(stage), g.roster.teams, g.hw.name,
                              ws.course.feedback)
         digest = _plan_digest([{"repo": p.team.repo, "action": p.action, "body": p.body} for p in plan if p.todo])
         return g, plan, digest

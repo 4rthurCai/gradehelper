@@ -130,7 +130,8 @@ unfilled_threshold = 0.6
 [feedback]
 # One issue per team, posted by the bot (GITEA_BOT_ACCESS_TOKEN) with `gradehelper feedback hN`:
 # opened after the group run, answered in the same issue after the final run (group + 1 day).
-# Teams without a release by the group deadline get only `late` as the answer.
+# The answer also lists individual deductions and every student's score; teams without a
+# release by the group deadline get `late` appended.
 title = "{hw} feedback"
 group_heading = "{hw}: auto-grader result at the group deadline"
 final_heading = "{hw}: auto-grader result 24 hours after the group deadline"
@@ -138,4 +139,5 @@ group_no_problem = "No problem detected by the auto-grader, but TAs might detect
 group_problems = "TAs might detect more during the manual review. Feel free to improve your submission if you wish."
 final_no_problem = "No problem detected by the auto-grader."
 final_problems = "If you want to provide more information regarding those issues, please reply in this thread."
+final_scores = "Homework score of each student:"
 late = "Late submission, no feedback provided.\n\nGetting this message doesn't mean feedback stage is over."

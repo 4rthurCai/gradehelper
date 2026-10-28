@@ -97,9 +97,9 @@ optional = ["ex1.h"]
 `gradehelper feedback 3` 默认处理最近的一次小组轮（可以用 `--stage group|final` 指定），先预览，确认后以 bot 身份发出：
 
 - 第 3 轮之后：在每个 team 仓库开「h3 feedback」issue，指派给所有 collaborator。内容是小组 deadline 时的结果：扣分表（问题、谁：整个 team 或具体学生、分值）、细节，最后一句是 "TAs might detect more during the manual review. Feel free to improve your submission if you wish."。没有扣分的 team 只写一句 "No problem detected by the auto-grader, but TAs might detect more during the manual review. Feel free to improve your submission if you wish."。
-- 第 4 轮之后：在这个 issue 里回复 +24h 的结果，有问题时最后一句是 "If you want to provide more information regarding those issues, please reply in this thread."，没有问题时是 "No problem detected by the auto-grader."。小组 deadline 时没有 release 的 team（Late）只回复 "Late submission, no feedback provided. ..."，不列结果。
+- 第 4 轮之后：在这个 issue 里回复 +24h 的结果。扣分表里还会列出个人部分的扣分（第 2 轮冻结的结果，申诉也可以针对个人部分），然后是每个学生这份作业的分数表。有问题时最后一句是 "If you want to provide more information regarding those issues, please reply in this thread."，没有问题时是 "No problem detected by the auto-grader."。小组 deadline 时没有 release 的 team（Late）收到同样的回复，最后再加上 "Late submission, no feedback provided. ..."。
 
-- issue 里只列这一轮自己的扣分（小组项），个人部分的问题走 Mattermost。
+- 第 3 轮开的 issue 只列小组项的扣分，不写分数；个人部分的问题走 Mattermost。
 - 不会重复发：已经有「h3 feedback」的 team 不会再开新 issue，已经回复过的 issue 会跳过，所以 `feedback` 可以放心重跑。
 - 所有文字都在 `config/course.toml` 的 `[feedback]` 里。
 
@@ -168,9 +168,9 @@ gradehelper group 3 -t 5,12 -d 2026-10-02T23:59:59+08:00   # 用指定的截止�
 | release 创建时间 | 第 3 轮（截止 10/2 23:59，写进反馈 issue） | 第 4 轮（截止 10/3 23:59） | Late |
 | --- | --- | --- | --- |
 | 10/2 23:59 前 | 正常评分 | 正常评分 | No |
-| 10/2 23:59 至 10/3 23:59 | 视为未提交，-2.5（写在 issue 里，起提醒作用） | 正常评分，迟交本身不扣分 | Yes，issue 里只回复迟交说明 |
-| 10/3 23:59 之后 | -2.5 | 拒收，-2.5 | Yes，issue 里只回复迟交说明 |
-| 没有 tag、只有 draft、或只有 tag 没有 release | -2.5 | -2.5 | Yes，issue 里只回复迟交说明 |
+| 10/2 23:59 至 10/3 23:59 | 视为未提交，-2.5（写在 issue 里，起提醒作用） | 正常评分，迟交本身不扣分 | Yes，回复末尾加迟交说明 |
+| 10/3 23:59 之后 | -2.5 | 拒收，-2.5 | Yes，回复末尾加迟交说明 |
+| 没有 tag、只有 draft、或只有 tag 没有 release | -2.5 | -2.5 | Yes，回复末尾加迟交说明 |
 
 - 被视为未提交的 team 只扣一次 `groupFailSubmit`，detail 里写明原因。它们的 tag 内容、编译和小组 JOJ 都不再检查。同伴 review 照常按这一轮的截止时间检查。
 - 如果 `hN` tag 指向的 commit 没有对应的 JOJ release 运行（可能是 release 之后挪过 tag），会在 CSV 的 `TA Notes` 列里提示。这只是给 TA 的提示，不扣分，学生也看不到。
