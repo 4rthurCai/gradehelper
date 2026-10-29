@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Roster · Grade Helper{% endblock %}
+{% block content %}
+<p><a href="{{ next }}">← back</a></p>
+<h1>Roster check</h1>
+<p class="muted">Every grading run first compares {{ file }} with the hteam groups on Canvas.</p>
+{% if error %}
+  <div class="notice bad">Cannot reach Canvas: {{ error }}</div>
+{% elif not groups %}
+  <div class="notice ok">{{ file }} matches Canvas ({{ canvas.roster.graded | length }} students in {{ canvas.roster.teams | length }} teams).</div>
+{% else %}
+  <div class="notice warn">{{ file }} differs from Canvas. Update it, then run the stage again.</div>
+  <form method="post" action="/roster/sync" class="panel row" hx-confirm="Overwrite {{ file }} with the Canvas groups?">
+    <input type="hidden" name="digest" value="{{ digest }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <strong>{{ canvas.changes | length }} change(s)</strong>
+    <button class="danger">Update {{ file }}</button>
+  </form>
+  {% for kind, changes in groups %}
+  <h2>{{ changes | length }} {{ kind }}</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Name</th><th>ID</th><th>Before</th><th>After</th></tr></thead>
+    <tbody>
+    {% for c in changes %}
+      <tr><td>{{ c.student.display_name }}</td><td class="muted">{{ c.student.id }}</td>
+        <td>{{ c.before or "(no team)" }}</td><td>{{ c.after or "(no team)" }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endfor %}
+{% endif %}
+{% endblock %}

@@ -136,6 +136,11 @@ class Grader:
     def roster(self) -> Roster:
         return self.full_roster.select_teams(self.teams)
 
+    def reload_roster(self) -> None:
+        """After hteams.csv changed on disk (e.g. updated from Canvas before a run)."""
+        for name in ("full_roster", "roster"):
+            self.__dict__.pop(name, None)
+
     @cached_property
     def gitea(self) -> GiteaClient:
         return GiteaClient(self.ws.secrets)

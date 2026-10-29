@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from .config import Workspace
 from .models import Roster, Student, team_number
 
 log = logging.getLogger(__name__)
@@ -109,3 +110,24 @@ def diff_rosters(old: Roster, new: Roster) -> list[RosterChange]:
             kind = LEFT_TEAM if not a.team else JOINED_TEAM if not b.team else MOVED
             changes.append(RosterChange(kind, a, b.team, a.team))
     return sorted(changes, key=lambda c: (CHANGE_ORDER.index(c.kind), c.before or c.after, c.student.id))
+
+
+@dataclass(frozen=True)
+class CanvasRoster:
+    roster: Roster
+    emails: dict[str, str]
+    changes: tuple[RosterChange, ...]  # what saving it would change in hteams.csv
+
+
+def compare_with_canvas(path: Path, course) -> CanvasRoster:
+    """The Canvas roster and how it differs from hteams.csv (a missing file counts as empty)."""
+    roster, emails = roster_from_canvas(course)
+    local = load_roster(path) if path.exists() else Roster(())
+    return CanvasRoster(roster, emails, tuple(diff_rosters(local, roster)))
+
+
+def check_against_canvas(ws: Workspace) -> CanvasRoster:
+    """Before every grading run: are hteams.csv and the Canvas hteam groups the same?"""
+    from .clients.canvas import CanvasClient
+
+    return compare_with_canvas(ws.roster_path, CanvasClient(ws.secrets).course)

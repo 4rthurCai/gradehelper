@@ -30,7 +30,7 @@ from .grading import fmt_points
 from .notify import build_warnings, send_warnings
 from .pipeline import Grader, suggest_stage
 from .report import HandEditedError, Row, read_final_csv
-from .roster import CHANGE_ORDER, diff_rosters, load_roster, roster_from_canvas, save_roster
+from .roster import CHANGE_ORDER, RosterChange, check_against_canvas, load_roster, roster_from_canvas, save_roster
 from .upload import apply_upload, ledger_path, plan_upload
 
 HELP = {"help_option_names": ["-h", "--help"]}
@@ -51,6 +51,8 @@ Deadline = Annotated[Optional[str], typer.Option("--deadline", "-d", help="overr
 Yes = Annotated[bool, typer.Option("--yes", "-y", help="do not ask for confirmation")]
 Warn = Annotated[bool, typer.Option("--warn", "-w", help="send Mattermost warnings afterwards")]
 Overwrite = Annotated[bool, typer.Option("--overwrite", help="regenerate CSVs even if they were edited by hand")]
+SkipRosterCheck = Annotated[bool, typer.Option(
+    "--skip-roster-check", help="grade with hteams.csv as is, without comparing it with Canvas first")]
 
 
 def _workspace() -> Workspace:
@@ -136,7 +138,46 @@ def _warn(grader: Grader, stage: str, yes: bool) -> None:
         console.print(f"  [red]{escape(f)}[/red]")
 
 
-def _run_stage(grader: Grader, stage: str, deadline: datetime | None, warn: bool, yes: bool) -> None:
+def _print_roster_changes(changes: tuple[RosterChange, ...] | list[RosterChange]) -> None:
+    for kind in CHANGE_ORDER:
+        group = [c for c in changes if c.kind == kind]
+        if group:
+            console.print(f"[bold]{len(group)} {kind}[/bold]")
+        for c in group:
+            move = f"{c.before or '(no team)'} -> {c.after or '(no team)'}"
+            console.print(f"  {escape(c.student.display_name)} ({c.student.id}): {move}")
+
+
+def _check_roster(grader: Grader, yes: bool, skip: bool) -> None:
+    """Before every grading run: hteams.csv must match the Canvas hteam groups."""
+    name = grader.ws.roster_path.name
+    if skip:
+        console.print(f"[yellow]roster check skipped: grading with {name} as is[/yellow]")
+        return
+    try:
+        canvas = check_against_canvas(grader.ws)
+    except Exception as e:
+        raise ConfigError(
+            f"cannot compare {name} with Canvas ({e}); add --skip-roster-check to grade with it as is"
+        ) from e
+    if not canvas.changes:
+        console.print(f"[dim]• {name} matches Canvas ({len(canvas.roster.graded)} students in "
+                      f"{len(canvas.roster.teams)} teams)[/dim]")
+        return
+    console.print(f"[yellow]{name} differs from Canvas:[/yellow]")
+    _print_roster_changes(canvas.changes)
+    if not yes and not typer.confirm(f"update {name} from Canvas and continue?"):
+        console.print(f"stopped: {name} differs from Canvas")
+        raise typer.Exit(1)
+    save_roster(grader.ws.roster_path, canvas.roster, canvas.emails)
+    grader.reload_roster()
+    console.print(f"[green]updated {name}[/green]")
+
+
+def _run_stage(
+    grader: Grader, stage: str, deadline: datetime | None, warn: bool, yes: bool, skip_roster_check: bool = False
+) -> None:
+    _check_roster(grader, yes, skip_roster_check)
     runner = {
         STAGE_INDIVIDUAL: grader.run_individual,
         STAGE_INDIVIDUAL_FINAL: grader.run_individual_final,
@@ -169,7 +210,10 @@ def _guard(fn):
 
 @app.command()
 @_guard
-def run(hw: Hw, teams: Teams = "", warn: Warn = False, yes: Yes = False, overwrite: Overwrite = False) -> None:
+def run(
+    hw: Hw, teams: Teams = "", warn: Warn = False, yes: Yes = False, overwrite: Overwrite = False,
+    skip_roster_check: SkipRosterCheck = False,
+) -> None:
     """One click: pick individual / individual-final / group / final from the deadlines and run it."""
     grader = _grader(hw, teams, overwrite)
     course = grader.ws.course
@@ -179,47 +223,47 @@ def run(hw: Hw, teams: Teams = "", warn: Warn = False, yes: Yes = False, overwri
     console.print(f"[bold]{grader.hw.name}: {stage} stage[/bold] ({escape(reason)})")
     if not yes and not typer.confirm("continue?", default=True):
         raise typer.Exit()
-    _run_stage(grader, stage, None, warn, yes)
+    _run_stage(grader, stage, None, warn, yes, skip_roster_check)
 
 
 @app.command()
 @_guard
 def individual(
     hw: Hw, teams: Teams = "", deadline: Deadline = None, warn: Warn = False, yes: Yes = False,
-    overwrite: Overwrite = False,
+    overwrite: Overwrite = False, skip_roster_check: SkipRosterCheck = False,
 ) -> None:
     """1. Individual deadline: branches, individual PRs, PR descriptions, JOJ; reminders only. Aliases: indv, i."""
-    _run_stage(_grader(hw, teams, overwrite), STAGE_INDIVIDUAL, _deadline(deadline), warn, yes)
+    _run_stage(_grader(hw, teams, overwrite), STAGE_INDIVIDUAL, _deadline(deadline), warn, yes, skip_roster_check)
 
 
 @app.command("individual-final")
 @_guard
 def individual_final(
     hw: Hw, teams: Teams = "", deadline: Deadline = None, warn: Warn = False, yes: Yes = False,
-    overwrite: Overwrite = False,
+    overwrite: Overwrite = False, skip_roster_check: SkipRosterCheck = False,
 ) -> None:
     """2. Individual deadline + 1 day: the same checks again; this is the individual score. Alias: indv-final."""
-    _run_stage(_grader(hw, teams, overwrite), STAGE_INDIVIDUAL_FINAL, _deadline(deadline), warn, yes)
+    _run_stage(_grader(hw, teams, overwrite), STAGE_INDIVIDUAL_FINAL, _deadline(deadline), warn, yes, skip_roster_check)
 
 
 @app.command()
 @_guard
 def group(
     hw: Hw, teams: Teams = "", deadline: Deadline = None, warn: Warn = False, yes: Yes = False,
-    overwrite: Overwrite = False,
+    overwrite: Overwrite = False, skip_roster_check: SkipRosterCheck = False,
 ) -> None:
     """3. Group deadline: tag, reviews, release, lateness; then `feedback` opens the issues. Alias: g."""
-    _run_stage(_grader(hw, teams, overwrite), STAGE_GROUP, _deadline(deadline), warn, yes)
+    _run_stage(_grader(hw, teams, overwrite), STAGE_GROUP, _deadline(deadline), warn, yes, skip_roster_check)
 
 
 @app.command()
 @_guard
 def final(
     hw: Hw, teams: Teams = "", deadline: Deadline = None, warn: Warn = False, yes: Yes = False,
-    overwrite: Overwrite = False,
+    overwrite: Overwrite = False, skip_roster_check: SkipRosterCheck = False,
 ) -> None:
     """4. Group deadline + 1 day: full grading for TA review; then `feedback` replies. Alias: f."""
-    _run_stage(_grader(hw, teams, overwrite), STAGE_FINAL, _deadline(deadline), warn, yes)
+    _run_stage(_grader(hw, teams, overwrite), STAGE_FINAL, _deadline(deadline), warn, yes, skip_roster_check)
 
 
 FEEDBACK_STATE = {
@@ -412,20 +456,15 @@ def roster_sync(yes: Yes = False) -> None:
     ws = _workspace()
     from .clients.canvas import CanvasClient
 
-    roster, emails = roster_from_canvas(CanvasClient(ws.secrets).course)
-    old = load_roster(ws.roster_path) if ws.roster_path.exists() else None
-    if old is not None:
-        changes = diff_rosters(old, roster)
-        if not changes:
+    if not ws.roster_path.exists():
+        roster, emails = roster_from_canvas(CanvasClient(ws.secrets).course)
+    else:
+        canvas = check_against_canvas(ws)
+        roster, emails = canvas.roster, canvas.emails
+        if not canvas.changes:
             console.print("no team changes on Canvas")
-        for kind in CHANGE_ORDER:
-            group = [c for c in changes if c.kind == kind]
-            if group:
-                console.print(f"[bold]{len(group)} {kind}[/bold]")
-            for c in group:
-                move = f"{c.before or '(no team)'} -> {c.after or '(no team)'}"
-                console.print(f"  {escape(c.student.display_name)} ({c.student.id}): {move}")
-        if changes and not yes and not typer.confirm(f"overwrite {ws.roster_path.name}?"):
+        _print_roster_changes(canvas.changes)
+        if canvas.changes and not yes and not typer.confirm(f"overwrite {ws.roster_path.name}?"):
             console.print("not saved")
             raise typer.Exit()
     save_roster(ws.roster_path, roster, emails)

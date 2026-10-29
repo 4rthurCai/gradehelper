@@ -395,3 +395,120 @@ def test_cli_roster_sync_shows_changes_and_can_decline(workspace, monkeypatch):
     assert (workspace.root / "hteams.csv").read_text(encoding="utf-8") == before
     CliRunner().invoke(cli.app, ["roster", "sync", "--yes"])
     assert "520000000003" not in (workspace.root / "hteams.csv").read_text(encoding="utf-8")
+
+
+# ---------- roster check before grading ----------
+
+SAME_TEAMS = {"hteam 1": [ALICE, BOB], "hteam 2": [CAROL, DAVE]}
+BOB_LEFT = {"hteam 1": [ALICE], "hteam 2": [CAROL, DAVE]}
+
+
+def fake_canvas_roster(monkeypatch, teams: dict, fail: str = "") -> None:
+    """Canvas with all five students and these hteam groups (or a Canvas that cannot be reached)."""
+    from gradehelper.clients import canvas as canvas_client
+    from gradehelper.config import ConfigError
+
+    if fail:
+        def unreachable(self, secrets):
+            raise ConfigError(fail)
+
+        monkeypatch.setattr(canvas_client.CanvasClient, "__init__", unreachable)
+        return
+    people = (ALICE, BOB, CAROL, DAVE, LONER)
+    number = {s.id: i for i, s in enumerate(people, 1)}
+    users = [canvas_user(number[s.id], s) for s in people]
+    groups = [ns(name=name, get_memberships=lambda members=members: [ns(user_id=number[s.id]) for s in members])
+              for name, members in teams.items()]
+    course = ns(get_users=lambda enrollment_type: users, get_groups=lambda: groups)
+    monkeypatch.setattr(canvas_client.CanvasClient, "__init__", lambda self, secrets: None)
+    monkeypatch.setattr(canvas_client.CanvasClient, "course", course, raising=False)
+
+
+def record_runs(monkeypatch) -> list[str]:
+    """Bob's team as each individual run saw it; nothing is graded for real."""
+    seen = []
+    monkeypatch.setattr(Grader, "run_individual",
+                        lambda self, deadline=None: seen.append(self.full_roster.by_id()[BOB.id].team))
+    return seen
+
+
+def test_grading_run_compares_the_roster_with_canvas_first(workspace, monkeypatch):
+    monkeypatch.chdir(workspace.root)
+    seen = record_runs(monkeypatch)
+    fake_canvas_roster(monkeypatch, SAME_TEAMS)
+    result = CliRunner().invoke(cli.app, ["individual", "1"])
+    assert result.exit_code == 0, result.output
+    assert "hteams.csv matches Canvas" in result.output and seen == ["hteam-01"]
+
+
+def test_roster_difference_stops_the_run_unless_accepted(workspace, monkeypatch):
+    monkeypatch.chdir(workspace.root)
+    seen = record_runs(monkeypatch)
+    fake_canvas_roster(monkeypatch, BOB_LEFT)
+    sheet = workspace.roster_path
+    before = sheet.read_text(encoding="utf-8")
+
+    declined = CliRunner().invoke(cli.app, ["individual", "1"], input="n\n")
+    assert declined.exit_code == 1
+    assert "1 no longer in a team" in declined.output and "John Doe" in declined.output
+    assert seen == [] and sheet.read_text(encoding="utf-8") == before
+
+    accepted = CliRunner().invoke(cli.app, ["individual", "1"], input="y\n")
+    assert accepted.exit_code == 0, accepted.output
+    assert seen == [""]  # graded with the updated roster
+    assert load_roster(sheet).by_id()[BOB.id].team == ""
+
+
+def test_roster_is_updated_without_asking_with_yes(workspace, monkeypatch):
+    monkeypatch.chdir(workspace.root)
+    seen = record_runs(monkeypatch)
+    fake_canvas_roster(monkeypatch, BOB_LEFT)
+    result = CliRunner().invoke(cli.app, ["individual", "1", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert seen == [""]
+
+
+def test_unreachable_canvas_stops_the_run_unless_skipped(workspace, monkeypatch):
+    monkeypatch.chdir(workspace.root)
+    seen = record_runs(monkeypatch)
+    fake_canvas_roster(monkeypatch, SAME_TEAMS, fail="connection refused")
+    stopped = CliRunner().invoke(cli.app, ["individual", "1"])
+    assert stopped.exit_code == 1 and seen == []
+    assert "connection refused" in stopped.output and "--skip-roster-check" in stopped.output
+    skipped = CliRunner().invoke(cli.app, ["individual", "1", "--skip-roster-check"])
+    assert skipped.exit_code == 0, skipped.output
+    assert "roster check skipped" in skipped.output and seen == ["hteam-01"]
+
+
+def test_web_run_sends_to_the_roster_page_when_canvas_differs(web, workspace, monkeypatch):
+    client, token = web
+    seen = record_runs(monkeypatch)
+    fake_canvas_roster(monkeypatch, BOB_LEFT)
+    headers = {"X-Token": token}
+    run = client.post("/hw/1/run/individual", headers=headers, follow_redirects=False)
+    assert run.status_code == 303 and run.headers["location"].startswith("/roster?next=")
+    page = client.get(run.headers["location"]).text
+    assert "no longer in a team" in page and "John Doe" in page
+    assert 'name="next" value="/hw/1?stage=individual"' in page
+    digest = re.search(r'name="digest" value="([^"]+)"', page).group(1)
+
+    stale = client.post("/roster/sync", data={"digest": "x", "next": "/"}, headers=headers, follow_redirects=False)
+    assert stale.status_code == 409
+    done = client.post("/roster/sync", data={"digest": digest, "next": "//evil.example"}, headers=headers,
+                       follow_redirects=False)
+    assert done.status_code == 303 and done.headers["location"] == "/"  # only local pages
+    assert load_roster(workspace.roster_path).by_id()[BOB.id].team == ""
+    assert "matches Canvas" in client.get("/roster").text
+    assert seen == []  # nothing graded yet: the TA clicks Run again
+
+
+def test_web_run_needs_canvas_or_an_explicit_skip(web, monkeypatch):
+    client, token = web
+    record_runs(monkeypatch)
+    fake_canvas_roster(monkeypatch, SAME_TEAMS, fail="connection refused")
+    headers = {"X-Token": token}
+    stopped = client.post("/hw/1/run/individual", headers=headers, follow_redirects=False)
+    assert stopped.status_code == 502 and "skip roster check" in stopped.text
+    skipped = client.post("/hw/1/run/individual", data={"skip_roster_check": "true"}, headers=headers,
+                          follow_redirects=False)
+    assert skipped.status_code == 303 and skipped.headers["location"] == "/hw/1?stage=individual"

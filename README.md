@@ -25,6 +25,13 @@ refuses to run without it.
 asks before overwriting `hteams.csv`; students without a team stay in the file but are not
 graded. Only `hteams.csv` is used; the legacy `hteams.json` / `p3teams.json` can be deleted.
 
+Every grading run (`individual`, `individual-final`, `group`, `final`, `run`, and Run in the web
+UI) first compares `hteams.csv` with the Canvas hteam groups. If they differ it lists the changes
+and asks whether to update `hteams.csv` and continue (`--yes` updates without asking; "no" stops
+the run). The web UI sends you to its roster page instead, with an "Update hteams.csv" button. If
+Canvas cannot be reached the run stops; `--skip-roster-check` (a checkbox in the web UI) grades
+with `hteams.csv` as is.
+
 Git access uses SSH (`GIT_HOST`, default `ssh://git@focs.gc.sjtu.edu.cn:2222`); repositories are
 cached in `repos/`.
 
@@ -109,7 +116,8 @@ only group deductions and no score (the individual part is on Mattermost). All t
 
 Common options: `-t/--teams "1,5"` (only these teams; other teams' saved results are kept),
 `-d/--deadline 2026-10-11T23:59:59+08:00` (override the run's cutoff), `-w/--warn`,
-`-y/--yes` (skip confirmations), `--overwrite` (see below), `-h/--help` on every command.
+`-y/--yes` (skip confirmations), `--overwrite` (see below), `--skip-roster-check` (do not
+compare `hteams.csv` with Canvas first), `-h/--help` on every command.
 
 ### Release timing (example: individual 9/30, group 10/2 23:59)
 

@@ -18,6 +18,7 @@ gradehelper doctor                   # 检查配置、凭据、ctags 和花名�
 ```
 
 - 读 Gitea 用你自己的 `GITEA_ACCESS_TOKEN`。反馈 issue 和回复以 bot 身份发出，用 `GITEA_BOT_ACCESS_TOKEN`（bot-engr151 的 token，只需要 `write:issue` 权限）；没填的话 `feedback` 不会运行。
+- 每次跑检查（`individual`、`individual-final`、`group`、`final`、`run`，以及网页上的 Run）之前，都会先核对 `hteams.csv` 和 Canvas 上的 hteam 分组。不一致时列出变化，问是否更新 `hteams.csv` 后继续：选 y 更新并继续，选 n 停止；加 `--yes` 直接更新。网页上会跳到名单页，点「Update hteams.csv」更新后再点 Run。连不上 Canvas 时会停止；确实需要时加 `--skip-roster-check`（网页上勾选 skip roster check）用现有的 `hteams.csv` 继续。
 - 服务器默认是 `focs.gc.sjtu.edu.cn`。git 走 SSH（`GIT_HOST`，默认 `ssh://git@focs.gc.sjtu.edu.cn:2222`）。
 - 仓库缓存在 `repos/`。遇到防火墙断开连接会自动重试。
 
@@ -147,6 +148,7 @@ gradehelper group 3 -t 5,12 -d 2026-10-02T23:59:59+08:00   # 用指定的截止�
 | `-y`，`--yes` | 跳过确认 |
 | `-h`，`--help` | 查看帮助，例如 `gradehelper -h`、`gradehelper i -h` |
 | `--overwrite` | 允许覆盖被人改过的 CSV（见下文） |
+| `--skip-roster-check` | 跑检查前不和 Canvas 核对 `hteams.csv` |
 
 ## 规则细节
 
@@ -270,7 +272,7 @@ engr151-joj 的 `master` 分支上找不到这份作业的 `conf-release.json`�
 `[deadlines]` 只接受 `individual`、`individual_final`、`group`、`final` 四个字段。旧版的 `review` 已经取消：第 4 轮的 review 截止时间就是 +24h。
 
 **有人退课或换组（开学前几周常见）**
-重新运行 `gradehelper roster sync`。它会从 Canvas 重新拉取学生和 hteam 分组，按类别列出变化：退课、不再在任何 team、换 team、加入 team、新加入课程。确认后才覆盖 `hteams.csv`。不在任何 team 的学生会保留在文件里，但不参与评分。
+每次跑检查前都会自动核对并提示更新。也可以手动运行 `gradehelper roster sync`：它会从 Canvas 重新拉取学生和 hteam 分组，按类别列出变化：退课、不再在任何 team、换 team、加入 team、新加入课程。确认后才覆盖 `hteams.csv`。不在任何 team 的学生会保留在文件里，但不参与评分。
 
 工具只用 `hteams.csv`。旧版的 `hteams.json`、`p3teams.json` 已经不再需要，可以删除。
 

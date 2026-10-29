@@ -6,6 +6,7 @@ import hashlib
 import json
 import secrets
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -27,6 +28,7 @@ from ..notify import build_warnings, send_warnings
 from ..overrides import Override, load_overrides, overrides_path, save_overrides
 from ..pipeline import Grader, suggest_stage
 from ..report import read_final_csv
+from ..roster import CHANGE_ORDER, check_against_canvas, save_roster
 from ..upload import apply_upload, ledger_path, plan_upload
 from .jobs import JobRunner
 
@@ -36,6 +38,11 @@ TEMPLATES.env.filters["pts"] = fmt_points
 
 def _plan_digest(items: list[dict]) -> str:
     return hashlib.sha256(json.dumps(items, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def _local_path(target: str) -> str:
+    """Redirect targets must stay on this page (no //host or absolute URLs)."""
+    return target if target.startswith("/") and not target.startswith("//") else "/"
 
 
 def create_app(ws: Workspace) -> FastAPI:
@@ -95,9 +102,18 @@ def create_app(ws: Workspace) -> FastAPI:
         )
 
     @app.post("/hw/{hw}/run/{stage}")
-    def run(hw: int, stage: str, teams: str = Form(""), deadline: str = Form("")):
+    def run(hw: int, stage: str, teams: str = Form(""), deadline: str = Form(""),
+            skip_roster_check: bool = Form(False)):
         if stage not in RUNS:
             raise HTTPException(404)
+        if not skip_roster_check:
+            try:
+                canvas = check_against_canvas(ws)
+            except Exception as e:
+                raise HTTPException(502, f"cannot compare {ws.roster_path.name} with Canvas ({e}); "
+                                         "tick 'skip roster check' to grade with it as is") from e
+            if canvas.changes:
+                return RedirectResponse(f"/roster?next={quote(f'/hw/{hw}?stage={stage}')}", status_code=303)
         from datetime import datetime
 
         when = datetime.fromisoformat(deadline) if deadline.strip() else None
@@ -184,6 +200,28 @@ def create_app(ws: Workspace) -> FastAPI:
         result = apply_upload(plan, ledger_path(ws.output_dir, hw))
         return render(request, "upload.html", g=g, assignment=assignment, plan=plan, digest=digest,
                       force=force, result=result, error="")
+
+    def _roster_digest(canvas) -> str:
+        return _plan_digest([{"id": c.student.id, "kind": c.kind, "after": c.after} for c in canvas.changes])
+
+    @app.get("/roster", response_class=HTMLResponse)
+    def roster_page(request: Request, next: str = "/"):
+        try:
+            canvas, error = check_against_canvas(ws), ""
+        except Exception as e:
+            canvas, error = None, str(e)
+        groups = [(kind, [c for c in canvas.changes if c.kind == kind]) for kind in CHANGE_ORDER] if canvas else []
+        return render(request, "roster.html", canvas=canvas, groups=[g for g in groups if g[1]], error=error,
+                      digest=_roster_digest(canvas) if canvas else "", next=_local_path(next),
+                      file=ws.roster_path.name)
+
+    @app.post("/roster/sync")
+    def roster_sync(digest: str = Form(...), next: str = Form("/")):
+        canvas = check_against_canvas(ws)
+        if _roster_digest(canvas) != digest:
+            raise HTTPException(409, "Canvas changed since the preview; reload and check again")
+        save_roster(ws.roster_path, canvas.roster, canvas.emails)
+        return RedirectResponse(_local_path(next), status_code=303)
 
     def _feedback_plan(hw: int, stage: str):
         g = grader(hw)

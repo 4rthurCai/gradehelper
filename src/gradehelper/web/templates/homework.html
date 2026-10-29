@@ -22,8 +22,9 @@
     <strong>Run {{ stage }} stage</strong>
     <input type="text" name="teams" placeholder="teams (blank = all)" size="16">
     <input type="text" name="deadline" placeholder="deadline override, RFC 3339" size="28">
+    <label class="muted"><input type="checkbox" name="skip_roster_check" value="true"> skip roster check</label>
     <button class="primary" {% if jobs.busy %}disabled{% endif %}>Run</button>
-    <span class="muted">reads Canvas/Gitea/git only</span>
+    <span class="muted">reads Canvas/Gitea/git only; checks hteams.csv against Canvas first</span>
   </form>
   <div class="row" style="margin-top: 10px">
     <a class="button" href="/hw/{{ g.hw.number }}/warnings?stage={{ stage }}">Preview Mattermost warnings…</a>
